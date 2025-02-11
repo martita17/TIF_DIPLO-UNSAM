@@ -1,6 +1,7 @@
 # TIF_DIPLO-UNSAM
 Trabajo Integrador Final del Diploma Universitario en Ciencias Sociales Computacionales y Humanidades Digitales IDAES-UNSAM
-
+#### Integrantes
+Alejandra Fauquié - Eugenia Peiretti - Martín Tapia Serrano
 ### Consigna Trabajo FInal
 ### Opción 2 (Módulo 5)
 

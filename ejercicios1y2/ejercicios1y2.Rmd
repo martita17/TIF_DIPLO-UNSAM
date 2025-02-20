@@ -1,0 +1,106 @@
+---
+title: "Trabajo_final"
+output: html_document
+date: "2025-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+base_limpia<-read.csv("C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/Bases/base_limpia.csv")
+library(tidyverse)
+library(tidytext)
+```
+
+## R Markdown
+
+¿Cuáles son las palabras más utilizadas en cada uno de los medios? ¿Pueden verse diferencias? (Tener en cuenta las diferentes métricas trabajadas en el curso: tf, tf-idf, etc.) Generar las visualizaciones que considere más pertinentes para responder la pregunta
+
+Observaciones: Abajo lo que hicimos fue un dataframe que tokeniza cada texto por
+palabras, cuenta las palabras por cada medio
+
+```{r cars}
+palabras <- base_limpia %>%
+        unnest_tokens(output = word, 
+                      input = texto) %>%
+        group_by(medio, word) %>%
+        summarise(n = n()) %>%
+        arrange(desc(n)) %>%
+        ungroup()
+```
+Acá calculamos el total de palabras por medio
+```{r}
+total_palabras <- palabras %>% 
+  group_by(medio) %>% 
+  summarize(total = sum(n))
+```
+
+```{r}
+palabras <- palabras %>%
+                left_join(total_palabras) %>%
+                ungroup() %>%
+                arrange(desc(n))
+```
+A continuación vemos una distribución en cuanto a peso de palabras
+
+```{r}
+palabras%>%
+        mutate(n = n/total) %>%
+        ggplot(aes(n, fill = medio)) +
+                geom_histogram(show.legend = FALSE) +
+                xlim(NA, 0.0002) +
+                 facet_wrap(~medio) +
+                theme_minimal()
+```
+Acá calculamos el tf_idf de cada palabra para comprobar su importancia
+```{r}
+notas_tf_idf <- palabras %>%
+  bind_tf_idf(word,medio, n)
+head(book_tf_idf)
+```
+Ordenamos de "más importante" a menos importante, notamos cosas raras (palabras unidas que no se tokenizaron quizás porque en el texto limpio vinieron unidas-quizás por punt)
+```{r}
+tf_idf_ord<-notas_tf_idf %>%
+  arrange(desc(tf_idf))
+
+```
+
+
+
+```{r}
+tf_idf_ord %>%
+  group_by(medio) %>%
+        slice_max(tf_idf, n = 20) %>%
+        ungroup() %>%
+        ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+        geom_col(show.legend = FALSE) +
+        facet_wrap(~medio, ncol = 2, scales = "free") +
+        labs(x = "tf-idf", y = NULL) +
+        theme_minimal()
+
+
+
+```
+
+## Comparar palabras importantes
+
+usando las métricas indicadas se puede es comparar palabras de importancia en los distintos medios, algo así -CONTENIDOS CLASE 2
+
+```{r pressure, echo=FALSE}
+
+```
+
+¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas
+
+Observaciones: modelado de topicos con LDA, contenidos clase 4
+
+
+```{r pressure, echo=FALSE}
+doc_2_topics <- tidy(lda_4, matrix = "gamma")
+doc_2_topics %>%
+  mutate(gamma = round(gamma, 5),
+         document = as.integer(document)) %>%
+  arrange(document, desc(gamma))
+```
+
+
+

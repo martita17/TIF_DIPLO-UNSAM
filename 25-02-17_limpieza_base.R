@@ -101,10 +101,12 @@ duplicados <- bd_clean1[duplicados_logico, ]
 bd_clean2 <- bd_clean1 %>% 
   filter((duplicated(bd_clean1$texto) | duplicated(bd_clean1$texto, fromLast = TRUE)) == F)
 
-
+bd_clean2 <- read.csv(file = "bases/base_limpia.csv")
 
 # Cargar stopwords en español
 stopwords_es <- get_stopwords(language = "es")
+stopwords_propias <- data_frame(word = "jpg", lexicon = "propio")
+stopwords_es <- bind_rows(stopwords_es, stopwords_propias)
 
 # Necesario revisar la importancia de la palabra estado, que se encuentra eliminada
 # a partir del set de stopwords que estamos usando.
@@ -113,7 +115,7 @@ stopwords_es <- get_stopwords(language = "es")
 bd_clean_3 <- bd_clean2 %>%
   mutate(
     texto_limpio = texto %>%
-      str_replace_all("[^\\w\\s]", "") %>%  # 1) Eliminar caracteres especiales
+      str_replace_all("[^\\w\\s]", " ") %>%  # 1) Eliminar caracteres especiales. Reemplazarlos por un espacio.
       str_replace_all("\\d+", "") %>%      # 2) Eliminar números
       str_replace_all("\\s+", " ") %>%     # 3) Reemplazar múltiples espacios y saltos de línea por un espacio
       str_to_lower()                       # 5) Convertir todo a minúscula

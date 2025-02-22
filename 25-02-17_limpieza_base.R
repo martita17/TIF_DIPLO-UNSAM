@@ -104,9 +104,7 @@ bd_clean2 <- bd_clean1 %>%
 bd_clean2 <- read.csv(file = "bases/base_limpia.csv")
 
 # Cargar stopwords en español
-stopwords_es <- get_stopwords(language = "es")
-stopwords_propias <- data_frame(word = "jpg", lexicon = "propio")
-stopwords_es <- bind_rows(stopwords_es, stopwords_propias)
+stopwords_es <- bind_rows(get_stopwords(language = "es"), data_frame(word = "jpg", lexicon = "propio"))
 
 # Necesario revisar la importancia de la palabra estado, que se encuentra eliminada
 # a partir del set de stopwords que estamos usando.
@@ -128,6 +126,18 @@ bd_clean_3 <- bd_clean2 %>%
     )  # 4) Remover stopwords
   )
 
+
+# A raíz del ejercicio de TF, TF-IDF, hemos detectado que las notas contenían ciertos
+# estractos de la página web que no resultan relevantes para el análisis. Por este motivo,
+# generamos códigos para poder limpar los mismos.
+
+bd_clean_3 <- bd_clean_3 %>% 
+  mutate(texto_limpio = case_when(
+    medio == "lanacion" ~ str_replace(texto_limpio,
+                                      " crédito .*? comentar gusta compartir mail twitter facebook whatsapp guardar \\S+",
+                                      ""),
+    TRUE ~ texto_limpio
+  ))
 
 bd_clean_3 <- bd_clean_3 %>% 
   mutate(caracteres_texto_limpio = nchar(texto_limpio))

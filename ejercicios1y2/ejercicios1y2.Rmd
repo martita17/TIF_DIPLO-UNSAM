@@ -6,7 +6,7 @@ date: "2025-02-10"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-base_limpia<-read.csv("C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/Bases/base_limpia.csv")
+base_limpia<-read.csv("../bases/base_limpia.csv")
 library(tidyverse)
 library(tidytext)
 ```
@@ -21,7 +21,7 @@ palabras, cuenta las palabras por cada medio
 ```{r cars}
 palabras <- base_limpia %>%
         unnest_tokens(output = word, 
-                      input = texto) %>%
+                      input = texto_limpio) %>%
         group_by(medio, word) %>%
         summarise(n = n()) %>%
         arrange(desc(n)) %>%
@@ -48,7 +48,7 @@ palabras%>%
         ggplot(aes(n, fill = medio)) +
                 geom_histogram(show.legend = FALSE) +
                 xlim(NA, 0.0002) +
-                 facet_wrap(~medio) +
+                facet_wrap(~medio) +
                 theme_minimal()
 ```
 Acá calculamos el tf_idf de cada palabra para comprobar su importancia

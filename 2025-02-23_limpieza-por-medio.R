@@ -5,7 +5,7 @@
 # se detectan palabras vacías que tienen altas frecuencias de aparición.
 # Por este motivo, exploramos por medio y generamos códigos para poder profundizar la limpieza.
 
-bd_clean_inicio <- read.csv(file = "bases/base_limpia.csv")
+bd_clean_inicio <- read.csv(file = "bases/base_limpia2.csv")
 
 list2env(split(bd_clean_inicio, bd_clean_inicio$medio), envir = .GlobalEnv)
 
@@ -72,6 +72,35 @@ cronica <- cronica %>%
   mutate(texto_limpio = str_replace_all(texto_limpio,
                                           "cronica com ar ",
                                           "")
+  )
+
+cronica <- cronica %>%
+  mutate(texto_limpio = str_replace(texto, "^[^@]*@\\S+", ""))
+
+# Cargar stopwords en español
+stop_words <- read.csv(file = "bases/z_stopwords.txt")
+
+stop_words <- stop_words %>% 
+  mutate(word = stringi::stri_trans_general(X0, "Latin-ASCII"), .keep = "unused") %>% 
+  filter(duplicated(word) == F)
+
+
+# Limpieza del texto
+cronica <- cronica %>%
+  mutate(
+    texto_limpio = texto_limpio %>%
+      stringi::stri_trans_general("Latin-ASCII") %>% 
+      str_replace_all("[^\\w\\s]", " ") %>%  # 1) Eliminar caracteres especiales. Reemplazarlos por un espacio.
+      str_replace_all("\\d+", "") %>%      # 2) Eliminar números
+      str_replace_all("\\s+", " ") %>%     # 3) Reemplazar múltiples espacios y saltos de línea por un espacio
+      str_to_lower()                       # 5) Convertir todo a minúscula
+  ) %>%
+  rowwise() %>%
+  mutate(
+    texto_limpio = str_c(
+      setdiff(unlist(str_split(texto_limpio, " ")), stop_words$word),
+      collapse = " "
+    )  # 4) Remover stopwords
   )
 
 palabras_cronica2 <- cronica %>%

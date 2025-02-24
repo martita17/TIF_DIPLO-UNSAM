@@ -165,7 +165,7 @@ stop_words2 <- tibble(word = c("ano", "anos", "embed", "lunes", "martes",
                                "miercoles", "jueves", "viernes", "sabado",
                                "domingo", "otrx", "otrxs", "lxs",
                                # Imágenes
-                               "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico", "heic", "avif",
+                               "jpg", "jpeg", "jpe", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico", "heic", "avif",
                                # Videos
                                "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "mpeg", "mpg", "3gp", "m4v", "ogv",
                                # Audios

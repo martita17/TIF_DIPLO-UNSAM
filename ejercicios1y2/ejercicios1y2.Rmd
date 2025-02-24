@@ -6,7 +6,7 @@ date: "2025-02-10"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-base_limpia<-read.csv("../bases/base_limpia.csv")
+bd_clean<-read.csv("../bases/base_limpia2.csv")
 library(tidyverse)
 library(tidytext)
 ```
@@ -19,7 +19,7 @@ Observaciones: Abajo lo que hicimos fue un dataframe que tokeniza cada texto por
 palabras, cuenta las palabras por cada medio
 
 ```{r cars}
-palabras <- base_limpia %>%
+palabras <- bd_clean %>%
         unnest_tokens(output = word, 
                       input = texto_limpio) %>%
         group_by(medio, word) %>%
@@ -29,32 +29,53 @@ palabras <- base_limpia %>%
 ```
 Acá calculamos el total de palabras por medio
 ```{r}
-total_palabras <- palabras %>% 
+# total_palabras <- palabras %>% 
+#   group_by(medio) %>% 
+#   summarize(total = sum(n))
+# 
+# palabras <- palabras %>%
+#                 left_join(total_palabras) %>%
+#                 ungroup() %>%
+#                 arrange(desc(n))
+
+# Con este código nos ahorramos dos pasos :)
+palabras <- palabras %>% 
   group_by(medio) %>% 
-  summarize(total = sum(n))
+  mutate(total_palabras = sum(n)) %>% 
+  ungroup() %>% 
+  arrange(desc(n))
+
+palabras <- palabras %>% 
+  mutate(peso = n/total_palabras)
+
+# Prueba de gráfico con log10
+#palabras %>% 
+#  ggplot(aes(log10(peso), fill = medio))+
+#  geom_histogram(show.legend = FALSE) +
+ # xlim(NA, 0.0002) +
+#  facet_wrap(~medio) +
+# theme_minimal()
+
 ```
 
-```{r}
-palabras <- palabras %>%
-                left_join(total_palabras) %>%
-                ungroup() %>%
-                arrange(desc(n))
-```
 A continuación vemos una distribución en cuanto a peso de palabras
 
 ```{r}
 palabras%>%
-        mutate(n = n/total) %>%
-        ggplot(aes(n, fill = medio)) +
+        #mutate(n = n/total_palabras) %>%
+        ggplot(aes(peso, fill = medio)) +
                 geom_histogram(show.legend = FALSE) +
                 xlim(NA, 0.0002) +
                 facet_wrap(~medio) +
                 theme_minimal()
 ```
+En general, se comprueba que hay una gran cantidad de palabras que aparecen pocas veces y muchas palabras que aparecen pocas veces
+
 Acá calculamos el tf_idf de cada palabra para comprobar su importancia
 ```{r}
 notas_tf_idf <- palabras %>%
   bind_tf_idf(word,medio, n)
+
 head(book_tf_idf)
 ```
 Ordenamos de "más importante" a menos importante, notamos cosas raras (palabras unidas que no se tokenizaron quizás porque en el texto limpio vinieron unidas-quizás por punt)

@@ -2,8 +2,9 @@ library(tidyverse)
 library(skimr)
 library(tidytext)
 library(dplyr)
+library(stringi)
 
-bd <- read.csv(file = "2024 M5_corpus_medios.csv")
+bd <- read.csv(file = "bases/2024 M5_corpus_medios.csv")
 
 str(bd)
 
@@ -101,18 +102,20 @@ duplicados <- bd_clean1[duplicados_logico, ]
 bd_clean2 <- bd_clean1 %>% 
   filter((duplicated(bd_clean1$texto) | duplicated(bd_clean1$texto, fromLast = TRUE)) == F)
 
-bd_clean2 <- read.csv(file = "bases/base_limpia.csv")
 
 # Cargar stopwords en español
-stopwords_es <- bind_rows(get_stopwords(language = "es"), data_frame(word = "jpg", lexicon = "propio"))
+stop_words <- read.csv(file = "bases/z_stopwords.txt")
 
-# Necesario revisar la importancia de la palabra estado, que se encuentra eliminada
-# a partir del set de stopwords que estamos usando.
+stop_words <- stop_words %>% 
+  mutate(word = stringi::stri_trans_general(X0, "Latin-ASCII"), .keep = "unused") %>% 
+  filter(duplicated(word) == F)
+
 
 # Limpieza del texto
 bd_clean_3 <- bd_clean2 %>%
   mutate(
     texto_limpio = texto %>%
+      stringi::stri_trans_general("Latin-ASCII") %>% 
       str_replace_all("[^\\w\\s]", " ") %>%  # 1) Eliminar caracteres especiales. Reemplazarlos por un espacio.
       str_replace_all("\\d+", "") %>%      # 2) Eliminar números
       str_replace_all("\\s+", " ") %>%     # 3) Reemplazar múltiples espacios y saltos de línea por un espacio
@@ -121,26 +124,11 @@ bd_clean_3 <- bd_clean2 %>%
   rowwise() %>%
   mutate(
     texto_limpio = str_c(
-      setdiff(unlist(str_split(texto_limpio, " ")), stopwords_es$word),
+      setdiff(unlist(str_split(texto_limpio, " ")), stop_words$word),
       collapse = " "
     )  # 4) Remover stopwords
   )
 
-
-# A raíz del ejercicio de TF, TF-IDF, hemos detectado que las notas contenían ciertos
-# estractos de la página web que no resultan relevantes para el análisis. Por este motivo,
-# generamos códigos para poder limpar los mismos.
-
-bd_clean_3 <- bd_clean_3 %>% 
-  mutate(texto_limpio = case_when(
-    medio == "lanacion" ~ str_replace(texto_limpio,
-                                      " crédito .*? comentar gusta compartir mail twitter facebook whatsapp guardar \\S+",
-                                      ""),
-    TRUE ~ texto_limpio
-  ))
-
-bd_clean_3 <- bd_clean_3 %>% 
-  mutate(caracteres_texto_limpio = nchar(texto_limpio))
 
 #Revisamos la mediana y la media de la cantidad de caracteres de las notas
 # POR ALGÚN EXTRAÑO MOTIVO NO FUNCIONA

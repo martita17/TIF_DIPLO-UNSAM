@@ -7,7 +7,7 @@ date: "2025-02-10"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-base_limpia<-read.csv("C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/bases/base_limpia2.csv")
+base_limpia<-read.csv("C:/Users/Euge/Documents/SOCIOLOGÍA/POSGRADO/Diplo Cs Soc Comp/Trabajo final/TIF_DIPLO-UNSAM/bases/base_limpia2.csv")
 bd_clean<-read.csv("../bases/base_limpia2.csv")
 
 library(tidyverse)
@@ -24,7 +24,7 @@ palabras, calcula frecuencia de cada palabra  por cada medio
 <<<<<<< HEAD
 ```{r frecuencia de cada palabra}
 nombres_medios<-c("clarin","cronishop","loading","shared","email","minutouno","infobae","paginai","eltrece","adami","tesone","spillman","reuters","telam","ayerdi","oloixarac","merle","stracuzzi","getty","foglia")
-library(textcat)
+# library(textcat)
 palabras <- bd_clean %>%
         unnest_tokens(output = word, 
                       input = texto_limpio) %>%
@@ -101,17 +101,30 @@ tf_idf_ord<-notas_tf_idf %>%
 
 ```{r gráfico tf_idf}
 tf_idf_ord %>%
-  group_by(medio) %>%
-        slice_max(tf_idf, n = 10) %>%
-        ungroup() %>%
-        ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
-        geom_col(show.legend = FALSE) +
-        facet_wrap(~medio, ncol = 2, scales = "free") +
+ group_by(medio) %>%
+      slice_max(tf_idf, n = 10) %>%
+     ungroup() %>%
+    ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+   geom_col(show.legend = FALSE) +
+  facet_wrap(~medio, ncol = 2, scales = "free") +
         labs(x = "tf-idf", y = NULL) +
         theme (axis.text.y = element_text(size=6))+
         theme_minimal()
-
-
+#tf_idf_ord %>%
+ # group_by(medio) %>%
+  #slice_max(tf_idf, n = 10) %>%
+  #ungroup() %>%
+  #ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+  #geom_col(show.legend = FALSE) +
+  #facet_wrap(~medio, ncol = 2, scales = "free") +
+  #scale_x_log10() +                                     # Escala logarítmica base 10 en eje x
+  #labs(x = "tf-idf (escala log10)", y = NULL) +
+  #theme_minimal() +
+  #theme(
+   # axis.text.y = element_text(size = 8),
+    #axis.text.x = element_text(size = 10),
+    #strip.text = element_text(size = 10),
+    #plot.margin = margin(10, 15, 10, 10))
 
 ```
 
@@ -126,14 +139,18 @@ palabras_p<-palabras %>%
 A continuación sacamos la frecuencia por palabra para LDA
 ```{r pressure, echo=FALSE}
 library(topicmodels)
+#palabras_lda <- bd_clean %>%
+ #       mutate(id = as.integer(id)) %>%
+  #  unnest_tokens(output = word, input = texto_limpio) %>%
+   # group_by(id,word) %>% 
+    #summarise(n=n())
 palabras_lda <- bd_clean %>%
-        mutate(id = as.integer(id)) %>%
-    unnest_tokens(output = word, input = texto_limpio) %>%
-    group_by(id,word) %>% 
-    summarise(n=n())
-     
+  mutate(id = as.integer(id)) %>%
+  unnest_tokens(output = word, input = texto_limpio) %>%
+  count(id, word, sort = TRUE)     
 
-       
+palabras_lda %>% head(10)
+
       
 ```
 
@@ -149,14 +166,16 @@ sacamos la matriz documento termino
 ```{r}
 
 disc_dtm <-palabras_lda %>%
-                cast_dtm(id, word, n) 
+                cast_dtm(id, word, n)
+
+unique(palabras_lda$n)
                 
 ```
 
 Se calcula modelo lda_4
 
 ```{r}
-lda_4 <- LDA(disc_dtm, k=8, control = list(seed = 1234))
+lda_4 <- LDA(disc_dtm, k=15, control = list(seed = 1234))
 
 lda_4
 

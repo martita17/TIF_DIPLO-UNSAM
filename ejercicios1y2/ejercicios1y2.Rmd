@@ -118,30 +118,25 @@ tf_idf_ord %>%
 ¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas
 
 Observaciones: modelado de topicos con LDA, contenidos clase 4
-```{r}
-palabras_p<-palabras %>% 
-  pivot_wider(names_from=medio,values_from =c(n,total))
-```
 
-A continuación sacamos la frecuencia por palabra para LDA
+
+A continuación sacamos la frecuencia por palabra para LDA por documento
 ```{r pressure, echo=FALSE}
 library(topicmodels)
+#palabras_lda <- bd_clean %>%
+ #       mutate(id = as.integer(id)) %>%
+  #  unnest_tokens(output = word, input = texto_limpio) %>%
+   # group_by(id,word) %>% 
+    #summarise(n=n())
+
 palabras_lda <- bd_clean %>%
-        mutate(id = as.integer(id)) %>%
-    unnest_tokens(output = word, input = texto_limpio) %>%
-    group_by(id,word) %>% 
-    summarise(n=n())
+  mutate(id = as.integer(id)) %>%
+  unnest_tokens(output = word, input = texto_limpio) %>%
+  count(id, word, sort = TRUE)
      
 
        
       
-```
-
-
-
-```{r}
-bd_clean[2,12]
-
 ```
 
 sacamos la matriz documento termino
@@ -156,7 +151,7 @@ disc_dtm <-palabras_lda %>%
 Se calcula modelo lda_4
 
 ```{r}
-lda_4 <- LDA(disc_dtm, k=8, control = list(seed = 1234))
+lda_4 <- LDA(disc_dtm, k=17, control = list(seed = 1234))
 
 lda_4
 
@@ -164,16 +159,16 @@ lda_4
 
 Sacamos la matriz beta, probabilidad de palabras de aparecer en cada tópico
 
-```{r}
+```{r matriz beta}
 library(reshape2)
 ap_topics <- tidy(lda_4, matrix = "beta") %>%
   mutate(beta = round(100*beta,6))
 ```
 Las 15 palabras más importantes de cada tópico:
-```{r}
+```{r 15 palabras}
 ap_top_terms <- ap_topics %>%
   group_by(topic) %>%
-  slice_max(beta, n = 8) %>% 
+  slice_max(beta, n = 10) %>% 
   ungroup() %>%
   arrange(topic, -beta)
 
@@ -181,7 +176,7 @@ ap_top_terms <- ap_topics %>%
 ```
 
 Sacamos el gráfico:
-```{r}
+```{r grafico beta}
 ap_top_terms %>%
   mutate(term = reorder_within(term, beta, topic)) %>%
   ggplot(aes(beta, term, fill = factor(topic))) +
@@ -196,20 +191,61 @@ ap_top_terms %>%
 
 ```
 
-```{r}
+Ahora testeamos o diferenciamos tópicos con el logaritmo (NO LO HICIMOS)
 
+```{r}
+#beta_wide <- ap_topics %>%
+ # mutate(topic = paste0("topic", topic)) %>%
+  #pivot_wider(names_from = topic, values_from = beta) %>% 
+  #filter(topic3 > .002 | topic4 > .002) %>%
+  #mutate(log_ratio3_4 = log2(topic4 / topic3))
 ```
 
-
-
-```{r pressure, echo=FALSE}
+Ahora sacamos la matriz gama: topico por documento
+```{r gamma, echo=FALSE}
+b_medios<-bd_clean %>% 
+  select(id,medio) 
 
 doc_2_topics <- tidy(lda_4, matrix = "gamma")
-doc_2_topics %>%
-  mutate(gamma = round(gamma, 5),
-         document = as.integer(document)) %>%
-  arrange(document, desc(gamma))
+graph_df<-doc_2_topics %>%
+  mutate(gamma = round(gamma, 5)) %>% 
+  rename(id=document)%>%
+  mutate(id = as.integer(id)) %>%
+  left_join(b_medios%>% unique()) %>%
+  group_by(medio, topic) %>%
+    summarise(mean = mean(gamma)*100) 
+  
+
+```
+```{r grafico gamma}
+graph_df$topic <- as.factor(graph_df$topic)
+p<-graph_df %>%
+   ggplot() +
+   geom_col(aes(x=topic, y=mean, fill=topic)) +
+    facet_wrap(~ medio)+
+    theme_minimal()+
+    theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank())
+    
+ p
 ```
 
+
+#Consigna 3:
+A continuación, seleccionar las noticias vinculadas a algún tópico relevante (por ejemplo, “Elecciones”) y construir un clasificador para predecir la orientación del diario. Utilizar alguno de los modelos de clasificación vistos a lo largo de al Diplomatura (regresión logística, random forest, etc.). Utilizar como features el “Spanish Billion Word Corpus and Embeddings”, analizado en clase (pueden descargar el embedding en formato .bin del link). ¿Qué resultados arroja el modelo? ¿Es posible mediante el texto de las noticias conocer la línea editorial del diario? Generar las visualizaciones y tablas correspondientes para una correcta evaluación del modelo.
+
+```{r}
+#orientacion,topic,id,medio, texto_limpio
+base_modelo <- doc_2_topics %>%   
+  left_join(
+    bd_clean %>% select(orientacion, id, medio, texto_limpio),
+    by = "id"
+  ) %>% 
+  group_by(id) %>%
+  slice_max(gamma, with_ties = FALSE) %>%
+  ungroup()
+
+```
 
 

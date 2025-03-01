@@ -201,7 +201,7 @@ Ahora testeamos o diferenciamos tópicos con el logaritmo (NO LO HICIMOS)
   #mutate(log_ratio3_4 = log2(topic4 / topic3))
 ```
 
-Ahora sacamos la matriz gama: topico por documento
+Ahora sacamos la matriz gama: topico por documento, luego promediamos los gammas para calcular probabilidad de que aparezca cada tópico. La matri gamma describe la probabilidad de cada nota de pertenecer a cada tópico...las probabilidades suman 100
 ```{r gamma, echo=FALSE}
 b_medios<-bd_clean %>% 
   select(id,medio) 
@@ -217,6 +217,7 @@ graph_df<-doc_2_topics %>%
   
 
 ```
+
 ```{r grafico gamma}
 graph_df$topic <- as.factor(graph_df$topic)
 p<-graph_df %>%

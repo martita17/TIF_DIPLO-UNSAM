@@ -1,3 +1,6 @@
+# ENLACES
+- **[Informe preliminar tf-idf](https://docs.google.com/document/d/1avMTT4l-7INxERRrsYDPO3VbDboIgxTv0d9YCRScpAY/edit?tab=t.0)**
+
 # TIF_DIPLO-UNSAM
 Trabajo Integrador Final del Diploma Universitario en Ciencias Sociales Computacionales y Humanidades Digitales IDAES-UNSAM
 #### Integrantes

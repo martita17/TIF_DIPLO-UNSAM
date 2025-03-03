@@ -1,0 +1,234 @@
+---
+title: "Trabajo_final"
+output: html_document
+date: "2025-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+base_limpia<-read.csv("C:/Users/Euge/Documents/SOCIOLOGÍA/POSGRADO/Diplo Cs Soc Comp/Trabajo final/TIF_DIPLO-UNSAM/bases/base_limpia2.csv")
+bd_clean<-read.csv("../bases/base_limpia2.csv")
+
+library(tidyverse)
+library(tidytext)
+```
+
+## R Markdown
+
+¿Cuáles son las palabras más utilizadas en cada uno de los medios? ¿Pueden verse diferencias? (Tener en cuenta las diferentes métricas trabajadas en el curso: tf, tf-idf, etc.) Generar las visualizaciones que considere más pertinentes para responder la pregunta
+
+Observaciones: Abajo lo que hicimos fue un dataframe que tokeniza cada texto en
+palabras, calcula frecuencia de cada palabra  por cada medio
+
+<<<<<<< HEAD
+```{r frecuencia de cada palabra}
+nombres_medios<-c("clarin","cronishop","loading","shared","email","minutouno","infobae","paginai","eltrece","adami","tesone","spillman","reuters","telam","ayerdi","oloixarac","merle","stracuzzi","getty","foglia")
+# library(textcat)
+palabras <- bd_clean %>%
+        unnest_tokens(output = word, 
+                      input = texto_limpio) %>%
+        group_by(medio, word) %>%
+        summarise(n = n()) %>%
+        arrange(desc(n)) %>%
+        ungroup() %>% 
+        filter(nchar(word)>3) %>%
+        filter(!word %in% nombres_medios)
+        
+        
+```
+Acá calculamos el total de palabras por medio para poder saber el peso de cada palabra
+
+```{r peso de cada palabra}
+total_palabras <- palabras %>% 
+  group_by(medio) %>% 
+  summarize(total = sum(n))
+
+ palabras <- palabras %>%
+                 left_join(total_palabras) %>%
+                 ungroup() %>%
+                 arrange(desc(n))
+
+palabras <- palabras %>% 
+  mutate(peso = n/total)
+
+# Prueba de gráfico con log10
+#palabras %>% 
+#  ggplot(aes(log10(peso), fill = medio))+
+#  geom_histogram(show.legend = FALSE) +
+ # xlim(NA, 0.0002) +
+#  facet_wrap(~medio) +
+# theme_minimal()
+
+```
+
+```{r union de cantidad de palabras con freq}
+
+```
+
+A continuación vemos una distribución en cuanto a peso de palabras
+```{r}
+
+```
+
+
+```{r grafico tf}
+palabras%>%
+        #mutate(n = n/total_palabras) %>%
+        ggplot(aes(peso, fill = medio)) +
+                geom_histogram(show.legend = FALSE) +
+                xlim(NA, 0.0002) +
+                facet_wrap(~medio) +
+                theme_minimal()
+```
+En general, se comprueba que hay una gran cantidad de palabras que aparecen pocas veces y muchas palabras que aparecen pocas veces
+
+Acá calculamos el tf_idf de cada palabra para comprobar su importancia
+```{r tf_idf}
+notas_tf_idf <- palabras %>%
+  bind_tf_idf(word,medio, n)
+head(notas_tf_idf)
+
+```
+Ordenamos de "más importante" a menos importante, notamos cosas raras (palabras unidas que no se tokenizaron quizás porque en el texto limpio vinieron unidas-quizás por punt)
+```{r }
+tf_idf_ord<-notas_tf_idf %>%
+  arrange(desc(tf_idf))
+
+```
+
+
+
+```{r gráfico tf_idf}
+tf_idf_ord %>%
+ group_by(medio) %>%
+      slice_max(tf_idf, n = 10) %>%
+     ungroup() %>%
+    ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+   geom_col(show.legend = FALSE) +
+  facet_wrap(~medio, ncol = 2, scales = "free") +
+        labs(x = "tf-idf", y = NULL) +
+        theme (axis.text.y = element_text(size=6))+
+        theme_minimal()
+#tf_idf_ord %>%
+ # group_by(medio) %>%
+  #slice_max(tf_idf, n = 10) %>%
+  #ungroup() %>%
+  #ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+  #geom_col(show.legend = FALSE) +
+  #facet_wrap(~medio, ncol = 2, scales = "free") +
+  #scale_x_log10() +                                     # Escala logarítmica base 10 en eje x
+  #labs(x = "tf-idf (escala log10)", y = NULL) +
+  #theme_minimal() +
+  #theme(
+   # axis.text.y = element_text(size = 8),
+    #axis.text.x = element_text(size = 10),
+    #strip.text = element_text(size = 10),
+    #plot.margin = margin(10, 15, 10, 10))
+
+```
+
+¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas
+
+Observaciones: modelado de topicos con LDA, contenidos clase 4
+```{r}
+palabras_p<-palabras %>% 
+  pivot_wider(names_from=medio,values_from =c(n,total))
+```
+
+A continuación sacamos la frecuencia por palabra para LDA
+```{r pressure, echo=FALSE}
+library(topicmodels)
+#palabras_lda <- bd_clean %>%
+ #       mutate(id = as.integer(id)) %>%
+  #  unnest_tokens(output = word, input = texto_limpio) %>%
+   # group_by(id,word) %>% 
+    #summarise(n=n())
+palabras_lda <- bd_clean %>%
+  mutate(id = as.integer(id)) %>%
+  unnest_tokens(output = word, input = texto_limpio) %>%
+  count(id, word, sort = TRUE)     
+
+palabras_lda %>% head(10)
+
+      
+```
+
+
+
+```{r}
+bd_clean[2,12]
+
+```
+
+sacamos la matriz documento termino
+
+```{r}
+
+disc_dtm <-palabras_lda %>%
+                cast_dtm(id, word, n)
+
+unique(palabras_lda$n)
+                
+```
+
+Se calcula modelo lda_4
+
+```{r}
+lda_4 <- LDA(disc_dtm, k=15, control = list(seed = 1234))
+
+lda_4
+
+```
+
+Sacamos la matriz beta, probabilidad de palabras de aparecer en cada tópico
+
+```{r}
+library(reshape2)
+ap_topics <- tidy(lda_4, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+```
+Las 15 palabras más importantes de cada tópico:
+```{r}
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 8) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+
+```
+
+Sacamos el gráfico:
+```{r}
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
+
+
+```
+
+```{r}
+
+```
+
+
+
+```{r pressure, echo=FALSE}
+
+doc_2_topics <- tidy(lda_4, matrix = "gamma")
+doc_2_topics %>%
+  mutate(gamma = round(gamma, 5),
+         document = as.integer(document)) %>%
+  arrange(document, desc(gamma))
+```
+
+
+

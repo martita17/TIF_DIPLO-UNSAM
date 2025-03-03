@@ -1,0 +1,335 @@
+---
+title: "TRABAJO FINAL INTEGRADOR - Script de limpieza"
+author: "Fauquié - Peiretti - Tapia Serrano"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+Este documento contiene los código utilizados para realizar una primera aproximación exploratoria y una limpieza de la base de datos de noticias sobre la cual desarrollaremos nuestro Trabajo Final Integrador del Diploma en Ciencias Sociales Computacionales y Humanidades Digitales, de la UNSAM.
+
+La primera parte de la limpieza se centrará en detectar observaciones que por algún motivo resulte conveniente eliminar de la base: porque están duplicadas, porque el texto de la noticia se ha perdido, por algún problema durante el scraping, etc. Esta primera limpieza resultará últil, a su vez, para conocer con mayor profundidad la estructura de la base de datos y sus características.
+
+#### Carga de librerías y de la base
+```{r}
+library(tidyverse)
+library(skimr)
+library(tidytext)
+library(dplyr)
+library(stringi)
+
+corpus_original <- read.csv(file = "bases/2024 M5_corpus_medios.csv")
+corpus_original <- as_tibble(corpus_original)
+head(corpus_original)
+```
+
+#### Exploración inicial
+```{r}
+skim_without_charts(corpus_original)
+```
+
+A partir del resumen anterior podemos detectar que la base cuenta con duplicados tanto a nivel del título (23 casos), como del texto de la nota (78 casos). 
+Exploraremos un poco más esta situación, comenzando por los títulos.
+```{r}
+corpus_original %>% 
+  select(id, url, titulo) %>% 
+  filter(duplicated(titulo))
+```
+
+A partir de la visualización anterior podemos observar que hay dos situaciones diferentes: por un lado, efectivamente nos encontramos con títulos duplicados (a pesar de que provienen de urls distintos); por otro, vemos que hay títulos que se repiten debido a que referencian un tipo de noticia particular, como _Pirulo de tapa_.
+Revisamos a continuación aquellas entradas en las que se duplica tanto el título como el textos.
+
+```{r}
+corpus_original %>% 
+  select(id, url, titulo, texto) %>% 
+  filter(duplicated(titulo, texto))
+```
+El código anterior nos permite ver solamente la entrada de la base que figura como duplicada, sin ver el original. Esto será importante tenerlo en cuenta más adelante.
+Vemos, por su parte, que hay entradas que parecen estar duplicadas más de una vez, como la noticia sobre el fallecimiento de De la Rúa.
+Podemos estar seguros de que al eliminar estas observaciones duplicadas no estaríamos perdiendo noticias. Sin embargo, resulta necesario explorar otro tipo de duplicaciones que parecen existir.
+
+```{r}
+corpus_original %>% 
+  select(id, titulo, texto) %>% 
+  filter(duplicated(texto))
+```
+Vemos que muchas de las observaciones que se encuentran duplicadas surgen de algún problema al momento de realizar el scraping sobre la nota. Por ejemplo, vemos que la observación *ID* = 52264, con *título* = _Más felices si solo cumplen tareas domésticas_, en el campo *texto* tiene una referencia a un discurso de Alberto Fernández durante la pandemia. Esto puede deberse al hecho de que al momento de hacer el scraping el código tomó algo que "no correspondía". Otras observaciones parecen contener textos vinculados a la sección de comentarios, por mencionar ejemplos.
+
+Por último, revisemos la presencia de NAs en el texto.
+```{r}
+corpus_original %>% 
+  select(id, titulo, texto) %>% 
+  filter(is.na(texto))
+```
+Nos encontramos con que hay 5 observaciones que no contienen el texto del artículo.
+
+Con esto contamos con una base sólida para comenzar con la limpieza.
+
+Comenzaremos eliminando aquellas observaciones que contienen NA en la variable texto y aquellas que tienen duplicado tanto el título como el texto de la nota (más allá de que el url pueda ser diferente).
+
+```{r}
+corpus_clean <- corpus_original %>% 
+  filter(is.na(texto) == F & (duplicated(texto) & duplicated(titulo)) == F)
+```
+
+Tras la anterior limpieza, los únicos duplicados que deberían quedarnos son aquellos que son el resultado de un problema a la hora de scrapear el texto de la noticia. Revisamos antes de proceder a eliminarlos.
+
+```{r}
+duplicados_vec <- duplicated(corpus_clean$texto) | duplicated(corpus_clean$texto, fromLast = TRUE)
+corpus_clean[duplicados_vec, ]
+```
+Podemos confirmar que estos duplicados surgen de errores al momento de realizar el scraping, por lo que procedemos a borrarlos.
+
+```{r}
+corpus_clean <- corpus_clean %>% 
+  filter((duplicated(corpus_clean$texto) | duplicated(corpus_clean$texto, fromLast = TRUE)) == F)
+```
+
+Con este nuevo corpus limpio de casos duplicados estamos en condiciones de avanzar sobre el proceso de normalización y limpieza de textos. Realizamos una primera limpieza.
+
+```{r}
+# Cargar stopwords en español
+stop_words <- read.csv(file = "bases/z_stopwords.txt")
+
+# Normalizamos el set de stopwords y eliminamos los duplicados que pueden generarse debido al paso anterior, como "el" y "él".
+stop_words <- stop_words %>% 
+  mutate(word = stringi::stri_trans_general(X0, "Latin-ASCII"), .keep = "unused") %>% 
+  filter(duplicated(word) == F)
+
+
+# Limpieza del texto
+corpus_clean <- corpus_clean %>%
+  mutate(
+    texto_limpio = texto %>%
+      stringi::stri_trans_general("Latin-ASCII") %>% 
+      str_replace_all("[^\\w\\s]", " ") %>%  # 1) Eliminar caracteres especiales. Reemplazarlos por un espacio.
+      str_replace_all("\\d+", "") %>%      # 2) Eliminar números.
+      str_replace_all("\\s+", " ") %>%     # 3) Reemplazar múltiples espacios y saltos de línea por un espacio.
+      str_to_lower()                       # 5) Convertir todo a minúscula
+  ) %>%
+  rowwise() %>%
+  mutate(
+    texto_limpio = str_c(
+      unlist(str_split(texto_limpio, " ")) %>%
+        keep(~ !(.x %in% stop_words$word)),  # 6) Elimina stopwords sin afectar repeticiones
+      collapse = " "
+    )
+  )
+```
+
+#### Detectando otros problemas
+Tras la primer limpieza, realizamos una serie de exploraciones semi-manuales de la base de datos y encontramos dos problemas extras: el primero, que hay un conjunto de observaciones que no contienen noticias en sí, sino referencias a videos en redes sociales o tweets; el segundo, hay artículos que contienen errores en el scraping y en el campo texto encontramos la oración _article download failed_.
+Luego de varias pruebas, llegamos a la conclusión de que el primer tipo de problema podemos solucionarlo eliminando aquellas entradas cuyo texto no contenga más de 250 caracteres. Esto no nos asegura eliminar todos ellos, pero sí que limpiamos la amplia mayoría.
+
+```{r}
+corpus_clean <- corpus_clean %>% 
+  mutate(caracteres_texto_limpio = nchar(texto_limpio))
+corpus_clean <- corpus_clean %>% 
+  filter(str_starts(texto_limpio, "article download failed") == F & caracteres_texto_limpio > 250)
+```
+
+
+#### Limpieza por medio
+En esta etapa, es importante tener en cuenta que, en ocasiones, al momento de realizar el scraping, traemos junto a los textos de las notas cierto contenido no deseado, que no forma parte del artículo en sí. Por este motivo, puede resultar interesante explorar el contenido de los artículos de manera separada para cada medio.
+
+En los hechos, para realizar el proceso de limpieza que a continuación compartimos como una sola línea de desarrollo, tuvimos que realizar varias idas y vuelta entre el texto original y el texto limpio.
+
+#### Partimos la base de datos en 8 subconjuntos que contienen las notas correspondientes a cada medio.
+```{r}
+list2env(split(corpus_clean, corpus_clean$medio), envir = .GlobalEnv)
+```
+#### Exploramos La Nación
+```{r}
+palabras_lanacion <- lanacion %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Detectamos varias palabras con altísima frecuencia de aparición que parecen vinculadas a contenido no propio de las notas. Al realizar una revisión manual de los texto descubrimos que muchos artículos contienen una porción de texto que refiere a redes sociales. Procedemos a eliminarlo.
+```{r}
+lanacion <- lanacion %>% 
+  mutate(texto_limpio = str_replace_all(texto_limpio,
+                                        " credito .*? comentar gusta gusta compartir mail twitter facebook whatsapp guardar \\S+|comentar gusta gusta compartir mail twitter facebook whatsapp guardar \\S+",
+                                        "")
+         )
+
+rm(palabras_lanacion)
+```
+
+
+#### Exploramos Clarín
+```{r}
+palabras_clarin <- clarin %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+En principio no se detecta presencia de "texto basura". Se registra fuerte presencia de palabras poco relevantes como ano, anos. También se registra una presencia considerable del nombre del medio.
+```{r}
+rm(palabras_clarin)
+```
+
+
+#### Exploramos Crónica 
+```{r}
+palabras_cronica <- cronica %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Los resultados son similares a los obtenidos para Clarín, sin embargo también detectamos alta frecuencia para términos como _cronica_ y _com_. Al revisar los artículos, vemos que en nuemerosos casos se ha scrpeado una porción de texto que no pertenece al artículo, sino al autor y al sitio web del medio. Procedemos a limpiarlo.
+En este caso la limpieza la haremos sobre el texto limpio, por lo que será necesario luego repetir el ejercicio de normalización y limpieza de stopwords.
+
+```{r}
+cronica <- cronica %>%
+  mutate(texto_limpio = str_replace(texto, "^[^@]*@\\S+", ""))
+
+cronica <- cronica %>%
+  mutate(
+    texto_limpio = texto_limpio %>%
+      stringi::stri_trans_general("Latin-ASCII") %>% 
+      str_replace_all("[^\\w\\s]", " ") %>%  # 1) Eliminar caracteres especiales. Reemplazarlos por un espacio.
+      str_replace_all("\\d+", "") %>%      # 2) Eliminar números
+      str_replace_all("\\s+", " ") %>%     # 3) Reemplazar múltiples espacios y saltos de línea por un espacio
+      str_to_lower()                       # 5) Convertir todo a minúscula
+  ) %>%
+  rowwise() %>%
+  mutate(
+    texto_limpio = str_c(
+      unlist(str_split(texto_limpio, " ")) %>%
+        keep(~ !(.x %in% stop_words$word)),  # 6) Elimina stopwords sin afectar repeticiones
+      collapse = " "
+    )
+  )
+
+rm(palabras_cronica)
+```
+
+
+#### Exploramos Infobae
+```{r}
+palabras_infobae <- infobae %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+
+```
+Se repiten las mismas observaciones que para Clarín.
+```{r}
+rm(palabras_infobae)
+```
+
+#### Exploramos Minuto Uno
+```{r}
+palabras_minutouno <- minutouno %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Se repiten las mismas observaciones que para Clarín y se detectan como palabras vacías: embed y jpg
+```{r}
+rm(palabras_minutouno)
+```
+
+
+#### Exloramos Página 12
+```{r}
+palabras_pagina12 <- pagina12 %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Se repiten las mismas observaciones que para Clarín.
+```{r}
+rm(palabras_pagina12)
+```
+
+#### Exploramos Perfil
+```{r}
+palabras_perfil <- perfil %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Se repiten las mismas observaciones que para Clarín.
+```{r}
+rm(palabras_perfil)
+```
+
+
+#### Exploramos Telam
+```{r}
+palabras_telam <- telam %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+```
+Se repiten las mismas observaciones que para Clarín.
+```{r}
+rm(palabras_telam)
+```
+
+
+#### Volvemos a unificar las bases y eliminamos los subsets de artículos por medio
+```{r}
+corpus_clean <- bind_rows(clarin, cronica, infobae, lanacion, minutouno, pagina12, perfil, telam)
+
+rm(clarin, cronica, infobae, lanacion, minutouno, pagina12, perfil, telam)
+```
+
+#### Realizamos una limpieza de los nuevos _términos vacíos_ que hemos detectado
+```{r}
+stop_words2 <- tibble(word = c("ano", "anos", "embed", "lunes", "martes",
+                               "miercoles", "jueves", "viernes", "sabado",
+                               "domingo", "otrx", "otrxs", "lxs",
+                               # Imágenes
+                               "jpg", "jpeg", "jpe", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico", "heic", "avif",
+                               # Videos
+                               "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "mpeg", "mpg", "3gp", "m4v", "ogv",
+                               # Audios
+                               "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus", "aiff", "amr"))
+
+corpus_clean <- corpus_clean %>% 
+  rowwise() %>%
+  mutate(
+    texto_limpio = str_c(
+      unlist(str_split(texto_limpio, " ")) %>%
+        keep(~ !(.x %in% stop_words2$word)),  # Elimina stopwords sin afectar repeticiones
+      collapse = " "
+    )
+  )
+```
+
+
+#### Exportamos la nueva base
+```{r}
+write.csv(corpus_clean, "bases/corpus_clean.csv", row.names = F)
+```
+
+
+
+
+

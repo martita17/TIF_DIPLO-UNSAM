@@ -1,0 +1,106 @@
+---
+title: "Visualizaciones TF-IDF"
+author: "Fauquié - Peiretti - Tapia Serrano"
+output: html_document
+date: "`r Sys.Date()`"
+---
+### Carga de librerías y de base
+```{r}
+library(tidyverse)
+library(tidytext)
+corpus_clean <- read.csv("bases/corpus_clean.csv")
+```
+
+¿Cuáles son las palabras más utilizadas en cada uno de los medios? ¿Pueden verse diferencias? (Tener en cuenta las diferentes métricas trabajadas en el curso: tf, tf-idf, etc.) Generar las visualizaciones que considere más pertinentes para responder la pregunta
+
+Observaciones: Abajo lo que hicimos fue un dataframe que tokeniza cada texto en
+palabras, calcula frecuencia de cada palabra  por cada medio
+
+#### Tokenizamos y generamos valores tf, idf, tf-idf
+```{r}
+palabras <- corpus_clean %>%
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup()
+
+notas_tf_idf <- palabras %>%
+  bind_tf_idf(word,medio, n) %>% 
+  arrange(desc(tf_idf))
+
+```
+
+#### Probamos una visualización exploratoria
+```{r}
+notas_tf_idf %>%
+  group_by(medio) %>%
+  slice_max(tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~medio, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL) +
+  theme (axis.text.y = element_text(size=6))+
+  theme_minimal()
+```
+#### Realizamos una nueva limpieza enfocada y un nuevo cálculo de las pruebas
+```{r}
+nombres_medios<-c("clarin","cronishop","loading","shared","email","minutouno",
+                  "infobae","paginai","eltrece","adami","tesone","spillman","reuters",
+                  "telam","ayerdi","oloixarac","merle","stracuzzi","getty","foglia")
+
+palabras_ultra_clean <- corpus_clean %>% 
+  unnest_tokens(output = word, 
+                input = texto_limpio) %>%
+  group_by(medio, word) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  ungroup() %>% 
+  filter(nchar(word) > 3) %>%
+  filter(!word %in% nombres_medios)
+
+notas_tf_idf_ultra <- palabras_ultra_clean %>%
+  bind_tf_idf(word,medio, n) %>% 
+  arrange(desc(tf_idf))
+```
+
+#### Volvemos a probar la visualización
+```{r}
+# Generamos una tabla para fanáticos de las tablas
+tf_idf_top10 <- notas_tf_idf_ultra %>%
+  group_by(medio) %>%
+  slice_max(tf_idf, n = 10) %>%
+  ungroup()
+
+notas_tf_idf_ultra %>%
+  group_by(medio) %>%
+  slice_max(tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~medio, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL) +
+  theme (axis.text.y = element_text(size=6))+
+  theme_minimal()
+```
+
+#### Realizamos una prueba quedándonos con aquellos términos que tienen una frecuencia mayor a 5 y los mayores tf-idf
+```{r}
+tf_idf_alta_frec <- notas_tf_idf_ultra %>% 
+  filter(n >= 5)
+
+tf_idf_alta_frec %>%
+  group_by(medio) %>%
+  slice_max(tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = medio)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~medio, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL) +
+  theme (axis.text.y = element_text(size=6))+
+  theme_minimal()
+```
+
+

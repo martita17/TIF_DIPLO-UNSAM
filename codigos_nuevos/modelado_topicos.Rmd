@@ -1,0 +1,206 @@
+---
+title: "Trabajo_final"
+output: html_document
+date: "2025-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+bd_clean<-read.csv("../bases/corpus_clean.csv")
+
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
+library(reshape2) 
+```
+
+¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas
+
+Observaciones: modelado de topicos con LDA, contenidos clase 4
+
+
+A continuación sacamos la frecuencia por palabra para LDA por documento
+```{r pressure, echo=FALSE}
+palabras_lda <- bd_clean %>%
+  unnest_tokens(output = word, input = texto_limpio) %>%
+  group_by(id,word) %>% 
+  summarise(n=n()) %>% 
+  ungroup()
+```
+
+sacamos la matriz documento termino
+
+```{r}
+
+disc_dtm <-palabras_lda %>%
+  cast_dtm(id, word, n) 
+                
+```
+
+Se calcula modelo lda_4
+
+```{r}
+lda_17 <- LDA(disc_dtm, k=17, control = list(seed = 1234)) # Corre en 1/2 hr aprox
+
+saveRDS(lda_17, "modelo_lda17.rds", compress = "xz")
+
+# Probamos modelos con menores K. Los números están pensado en base a que las secciones "fundamentales" de los diarios tienden a ser entre 7 y 10.
+
+lda_10 <- LDA(disc_dtm, k=10, control = list(seed = 1234)) # Corre en 15 minutos aprox
+
+saveRDS(lda_10, "modelo_lda10.rds", compress = "xz")
+
+lda_7 <- LDA(disc_dtm, k=7, control = list(seed = 1234)) # Corre en 10 minutos
+
+saveRDS(lda_7, "modelo_lda7.rds", compress = "xz")
+```
+
+Sacamos la matriz beta, probabilidad de palabras de aparecer en cada tópico
+
+```{r matriz beta}
+lda17 <- readRDS("modelo_lda17.rds")
+lda10 <- readRDS("modelo_lda10.rds")
+lda7 <- readRDS("modelo_lda7.rds")
+
+
+ap_topics17 <- tidy(lda_17, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+
+ap_topics10 <- tidy(lda_10, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+
+ap_topics7 <- tidy(lda_7, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+
+```
+Las 15 palabras más importantes de cada tópico:
+```{r 15 palabras}
+ap_top_terms17 <- ap_topics17 %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms10 <- ap_topics10 %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms7 <- ap_topics7 %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+```
+
+Sacamos el gráfico:
+```{r grafico beta}
+ap_top_terms17 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
+```
+
+
+```{r}
+ap_top_terms10 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
+```
+
+```{r}
+ap_top_terms7 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
+```
+
+
+Ahora testeamos o diferenciamos tópicos con el logaritmo (NO LO HICIMOS)
+
+```{r}
+#beta_wide <- ap_topics %>%
+ # mutate(topic = paste0("topic", topic)) %>%
+  #pivot_wider(names_from = topic, values_from = beta) %>% 
+  #filter(topic3 > .002 | topic4 > .002) %>%
+  #mutate(log_ratio3_4 = log2(topic4 / topic3))
+```
+
+### Composiciones de tópicos por documento
+Ahora sacamos la matriz gama: topico por documento, luego promediamos los gammas para calcular probabilidad de que aparezca cada tópico. La matri gamma describe la probabilidad de cada nota de pertenecer a cada tópico...las probabilidades suman 100
+```{r gamma, echo=FALSE}
+doc_2_topics <- tidy(lda_17, matrix = "gamma")
+
+doc_2_topics <- doc_2_topics %>%
+  mutate(gamma = round(gamma, 5),
+         id = as.integer(document),
+         .keep = "unused") %>%
+  arrange(id, desc(gamma))
+
+
+b_medios<-bd_clean %>% 
+  select(id,medio) 
+
+# Entiendo que esta tabla refiere a la combinación de tópicos por medio. A la probabilidad de un tópico determinado de emrger en un medio específico. Pero no estoy seguro.
+gamma_medios <- doc_2_topics %>%
+  left_join(b_medios%>% unique()) %>%
+  group_by(medio, topic) %>%
+  summarise(mean = mean(gamma)*100) 
+  
+
+```
+
+```{r grafico gamma}
+graph_df$topic <- as.factor(graph_df$topic)
+p<-graph_df %>%
+   ggplot() +
+   geom_col(aes(x=topic, y=mean, fill=topic)) +
+    facet_wrap(~ medio)+
+    theme_minimal()+
+    theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank())
+    
+ p
+```
+
+
+#Consigna 3:
+A continuación, seleccionar las noticias vinculadas a algún tópico relevante (por ejemplo, “Elecciones”) y construir un clasificador para predecir la orientación del diario. Utilizar alguno de los modelos de clasificación vistos a lo largo de al Diplomatura (regresión logística, random forest, etc.). Utilizar como features el “Spanish Billion Word Corpus and Embeddings”, analizado en clase (pueden descargar el embedding en formato .bin del link). ¿Qué resultados arroja el modelo? ¿Es posible mediante el texto de las noticias conocer la línea editorial del diario? Generar las visualizaciones y tablas correspondientes para una correcta evaluación del modelo.
+
+```{r}
+#orientacion,topic,id,medio, texto_limpio
+base_modelo <- doc_2_topics %>%   
+  left_join(
+    bd_clean %>% select(orientacion, id, medio, texto_limpio),
+    by = "id"
+  ) %>% 
+  group_by(id) %>%
+  slice_max(gamma, with_ties = FALSE) %>%
+  ungroup()
+
+```
+
+

@@ -1,0 +1,183 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidytext)
+
+```
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(textrecipes)
+```
+
+La base modelo finalmente lo que tiene que tener es los documentos (id y texto), su respectivo medio, con su respectiva orientacion. 
+
+```{r}
+topico<-3
+base_modelo <- doc_2_topics %>%   
+  left_join(
+    bd_clean %>% 
+      mutate(document=as.character(id)) %>% 
+      select(orientacion, document, medio, texto),
+    by = "document"
+  ) %>% 
+  group_by(document) %>%
+  slice_max(gamma, with_ties = FALSE) %>%
+  ungroup() %>% 
+  filter(topic==!!topico)
+
+base_modelo<-base_modelo %>% 
+  select(-gamma,-topic)
+
+```
+
+Para que la base funcione con los embeddings en español, es necesaria una limpieza más superficial: no se le quitan mayúsculas ni caractéres no ascii
+```{r}
+bmodelo_limpia <- base_modelo %>%
+        mutate(texto = str_replace_all(texto, "'\\[.*?¿\\]\\%'", " ")) %>%
+        mutate(texto = str_replace_all(texto, "[[:digit:]]+", "DIGITO")) %>% 
+        mutate(medio = as.numeric(factor(medio)))
+```
+
+Cargo los embeddings sugeridos
+```{r embeddings}
+load_embeddings <- function(path=NULL, type=c("w2v", "ft")){
+        if (type=="w2v"){
+                embedding <- word2vec::read.wordvectors(path, 
+                                                        type = "bin", 
+                                                        normalize = TRUE) %>%
+                        as_tibble(rownames="word")
+        }
+        else if (type=="ft"){
+                model <- fastTextR::ft_load(path)
+                words <- fastTextR::ft_words(model)
+                embedding <- fastTextR::ft_word_vectors(model,
+                                                        words) %>%
+                        as_tibble(rownames="word")
+        }
+        
+        return(embedding)
+}
+
+embedding <- load_embeddings(
+  path = "C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/bases/sbw_vectors.bin",
+  type = "w2v"
+)
+
+
+```
+
+tidy models me permite usar recipies también para construir la matriz de embeddings que será insumo para el modelo. Por lo que le indicamos...se tokenizará todo menos la columna document (que le estamos dando el rol de ID) y la columna orientacion.
+```{r recipe}
+notas_rec_embed <- recipe(orientacion ~ ., data = bmodelo_limpia) %>%
+        update_role("document", new_role = "ID") %>% 
+        step_tokenize(texto) %>% 
+        step_word_embeddings(texto, 
+                             embeddings=embedding,
+                             aggregation = "mean")
+```
+
+Se aplica la receta
+```{r prep}
+tictoc::tic()
+not_embed <- notas_rec_embed %>% prep() %>% bake(bmodelo_limpia)
+tictoc::toc()
+```
+
+Divido el dataset en validation, train y test para el modelo de progresion logaritmica
+```{r}
+set.seed(664)
+notas_split <- initial_split(not_embed, strata = orientacion)
+train_embed <- training(notas_split)
+test_embed <- testing(notas_split)
+
+```
+
+ A continuación eligo el modelo, en esta caso progresión logarítmica tipo lasso. 
+```{r modelo}
+lasso_spec <- multinom_reg(
+        penalty = tune(),
+        mixture = 1) %>%
+        set_mode("classification") %>%
+        set_engine("glmnet")
+```
+ 
+ A continuación seteos varios: construyo un recipe y un workflow y una grilla de hiperparámetros, esta le indicará distintas combinaciones de parámetros, así nos quedamos con la que mejor funciona. También seteo la validación cruzada
+```{r}
+notas_rec_embed <-
+        recipe(orientacion ~ ., data = train_embed) %>%
+        update_role("document", new_role = "ID")
+
+
+wf_embed <- workflow() %>% 
+        add_recipe(notas_rec_embed) %>%
+        add_model(lasso_spec)
+
+
+grid_lasso <- grid_regular(penalty(), levels = 10)
+
+
+set.seed(234)
+embed_folds <- vfold_cv(train_embed, v = 5)
+
+```
+ 
+ Entrenamiento
+```{r}
+tictoc::tic()
+tune_lasso_embed <- tune_grid(
+        wf_embed,
+        embed_folds,
+        grid = grid_lasso,
+        control = control_resamples(save_pred = TRUE)
+)
+tictoc::toc()
+```
+ 
+```{r}
+show_best(tune_lasso_embed)
+```
+
+```{r}
+chosen_auc_embed <- tune_lasso_embed %>%
+  select_by_one_std_err(metric = "roc_auc", -penalty)
+
+chosen_auc_embed
+```
+
+```{r}
+final_params_lasso_embed <- finalize_workflow(wf_embed, chosen_auc_embed)
+final_params_lasso_embed
+
+```
+Corremos el mejor modelo
+```{r}
+fitted_lasso_embed <- fit(final_params_lasso_embed, train_embed)
+```
+
+Hacemos el testeo con mejor modelo que teníamos
+```{r}
+preds_embed <- test_embed %>%
+        select(orientacion) %>%
+        bind_cols(predict(fitted_lasso_embed, test_embed, type="prob")) %>%
+        bind_cols(predict(fitted_lasso_embed, test_embed, type="class"))
+```
+
+```{r}
+glimpse(preds_embed)
+```
+
+
+Sacamos métricas del modelo...NO ME FUNCIONA ESTO       
+```{r}
+roc_auc(preds_embed, orientacion, .pred_neutro) %>%
+bind_rows(accuracy(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(precision(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(recall(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(f_meas(preds_embed, orientacion, .pred_class))
+```
+

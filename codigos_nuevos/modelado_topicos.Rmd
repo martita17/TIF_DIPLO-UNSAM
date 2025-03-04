@@ -13,6 +13,9 @@ library(tidyverse)
 library(tidytext)
 library(topicmodels)
 library(reshape2) 
+library(ggplot2)
+
+corpus_clean<- read_csv("C:/Users/Euge/Documents/SOCIOLOGÍA/POSGRADO/Diplo Cs Soc Comp/Trabajo final/TIF_DIPLO-UNSAM/bases/corpus_clean.csv")
 ```
 
 ¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas
@@ -54,6 +57,12 @@ saveRDS(lda_10, "modelo_lda10.rds", compress = "xz")
 lda_7 <- LDA(disc_dtm, k=7, control = list(seed = 1234)) # Corre en 10 minutos
 
 saveRDS(lda_7, "modelo_lda7.rds", compress = "xz")
+
+lda_12 <- LDA(disc_dtm, k=12, control = list(seed = 1234))
+saveRDS(lda_12, "modelo_lda12.rds", compress = "xz")
+
+lda_15 <- LDA(disc_dtm, k=15, control = list(seed = 1234))
+saveRDS(lda_12, "modelo_lda15.rds", compress = "xz")
 ```
 
 Sacamos la matriz beta, probabilidad de palabras de aparecer en cada tópico
@@ -62,19 +71,26 @@ Sacamos la matriz beta, probabilidad de palabras de aparecer en cada tópico
 lda17 <- readRDS("modelo_lda17.rds")
 lda10 <- readRDS("modelo_lda10.rds")
 lda7 <- readRDS("modelo_lda7.rds")
+lda12<- readRDS("modelo_lda12.rds")
+lda15<- readRDS("modelo_lda15.rds")
 
-
-ap_topics17 <- tidy(lda_17, matrix = "beta") %>%
+  ap_topics17 <- tidy(lda17, matrix = "beta") %>%
   mutate(beta = round(100*beta,6))
 
-ap_topics10 <- tidy(lda_10, matrix = "beta") %>%
+ap_topics10 <- tidy(lda10, matrix = "beta") %>%
   mutate(beta = round(100*beta,6))
 
-ap_topics7 <- tidy(lda_7, matrix = "beta") %>%
+ap_topics7 <- tidy(lda7, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+
+ap_topics12 <- tidy(lda12, matrix = "beta") %>%
+  mutate(beta = round(100*beta,6))
+
+ap_topics15 <- tidy(lda_12, matrix = "beta") %>%
   mutate(beta = round(100*beta,6))
 
 ```
-Las 15 palabras más importantes de cada tópico:
+Las 10 palabras más importantes de cada tópico:
 ```{r 15 palabras}
 ap_top_terms17 <- ap_topics17 %>%
   group_by(topic) %>%
@@ -89,6 +105,18 @@ ap_top_terms10 <- ap_topics10 %>%
   arrange(topic, -beta)
 
 ap_top_terms7 <- ap_topics7 %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms12 <- ap_topics12 %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms15 <- ap_topics15 %>%
   group_by(topic) %>%
   slice_max(beta, n = 10) %>% 
   ungroup() %>%
@@ -135,23 +163,77 @@ ap_top_terms7 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+``
+`
+```{r}
+ap_top_terms12 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
+```
+```{r}
+ap_top_terms15 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales='free_y') +
+  scale_y_reordered() +
+  theme(
+    axis.text.x = element_text(size=6)
+  )+
+  theme_minimal()
 ```
 
 
-Ahora testeamos o diferenciamos tópicos con el logaritmo (NO LO HICIMOS)
+Ahora testeamos o diferenciamos tópicos 5 y 10 de k12 con el logaritmo (NO LO HICIMOS)
 
 ```{r}
-#beta_wide <- ap_topics %>%
- # mutate(topic = paste0("topic", topic)) %>%
-  #pivot_wider(names_from = topic, values_from = beta) %>% 
-  #filter(topic3 > .002 | topic4 > .002) %>%
-  #mutate(log_ratio3_4 = log2(topic4 / topic3))
+dif_de_beta <- ap_topics12 %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(names_from = topic, values_from = beta) %>% 
+  filter(topic5 > .002 | topic10 > .002) %>%
+  mutate(log_ratio5_10 = log2(topic5 / topic10))
+
+dif_de_beta %>% 
+  slice_max(order_by = abs(log_ratio5_10), n = 10) %>%  
+  ggplot(aes(x=reorder(term,log_ratio5_10) , y=log_ratio5_10)) +
+    geom_col() +
+    coord_flip() +
+    labs(x='Término',
+         y='Log2 ratio topic5/topic10') +
+    theme_minimal()
+
+
+
+dif_de_beta %>%
+  slice_max(order_by = abs(log_ratio5_10), n = 20) %>%  # Filtra las 20 palabras más relevantes
+  ggplot(aes(x = reorder(term, log_ratio5_10), y = log_ratio5_10, fill = log_ratio5_10 > 0)) +
+  geom_col() +
+  scale_fill_manual(values = c("red", "steelblue"), guide = "none") +  # Rojo para negativos, azul para positivos
+  labs(
+    x = "Término",
+    y = "Log2 ratio topic5/topic10",
+    title = "Top 20 términos más relevantes entre Topic 5 y Topic 10"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  # Gira etiquetas para que no se solapen
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
 ```
 
 ### Composiciones de tópicos por documento
 Ahora sacamos la matriz gama: topico por documento, luego promediamos los gammas para calcular probabilidad de que aparezca cada tópico. La matri gamma describe la probabilidad de cada nota de pertenecer a cada tópico...las probabilidades suman 100
 ```{r gamma, echo=FALSE}
-doc_2_topics <- tidy(lda_17, matrix = "gamma")
+doc_2_topics <- tidy(modelo_lda12, matrix = "gamma")
 
 doc_2_topics <- doc_2_topics %>%
   mutate(gamma = round(gamma, 5),
@@ -163,27 +245,92 @@ doc_2_topics <- doc_2_topics %>%
 b_medios<-bd_clean %>% 
   select(id,medio) 
 
-# Entiendo que esta tabla refiere a la combinación de tópicos por medio. A la probabilidad de un tópico determinado de emrger en un medio específico. Pero no estoy seguro.
+#còdigo para hacer exploraciones por tópico y documento. Lo utilizamos para auydarnos a dilucidar algunos tópicos que no terminaban de esclarecerse solo con el listado de palabras 
+doc_2_topics_filt <- doc_2_topics %>%
+  filter(topic == 1 & gamma > 0.7)
+registro <- bd_clean %>%
+  filter(id == 	4817)
+unique(registro$texto)
+
+# Entiendo que esta tabla refiere a la combinación de tópicos por medio. A la probabilidad de un tópico determinado de emrger en un medio específico. Pero no estoy seguro. calcula el promedio del peso del tópico (gamma) para cada medio de comunicación y lo expresa en porcentaje. Del total de topicos, se representa el peso de cada uno por medio (el porcentaje se representa sobre el total de topicos por medio, es decir, todos los topicos de cada medio suman 100)
+
 gamma_medios <- doc_2_topics %>%
   left_join(b_medios%>% unique()) %>%
   group_by(medio, topic) %>%
   summarise(mean = mean(gamma)*100) 
   
+#topicos principales por medio
+
+top_ppales <- gamma_medios %>%
+  group_by(medio) %>%          # Agrupar por medio
+  slice_max(order_by = mean, n = 2) %>%  # Seleccionar los 2 tópicos con mayor mean
+  ungroup()  # Desagrupar para evitar problemas en análisis posteriores
+
+
 
 ```
 
 ```{r grafico gamma}
-graph_df$topic <- as.factor(graph_df$topic)
+graph_df <- gamma_medios
+graph_df$topic <- 
+  as.factor(graph_df$topic)
 p<-graph_df %>%
    ggplot() +
    geom_col(aes(x=topic, y=mean, fill=topic)) +
     facet_wrap(~ medio)+
+  scale_fill_discrete(labels = topic_labels) + 
     theme_minimal()+
+  labs(
+    title = "Tópicos por medio",
+    x = "Tópico",
+    y = "mean",
+    fill = "Tópico"
+  ) +
     theme(
     axis.text.x = element_blank(),
-    axis.ticks.x = element_blank())
+    axis.ticks.x = element_blank(), 
+    legend.position = "bottom" )
     
- p
+ print(p)
+ 
+ topic_labels <- c(
+  "1" = "Identidad, usos y costumbres",
+  "2" = "Derechos, educacion y salud",
+  "3" = "Politica Internacional",
+  "4" = "Elecciones nacionales",
+  "5"= "Tecnologia y redes soc.",
+  "6"= "Chimento y Farandula",
+  "7"= "Arte y espectaculos",
+  "8"= "Futbol",
+  "9"= "Siniestros viales",
+  "10"= "Agricultura y ganaderia",
+  "11"= "Economia",
+  "12"= "Justicia y policiales"
+  )
+ 
+ 
+```
+```{r}
+
+ p <- top_ppales %>%
+  ggplot(aes(x = factor(topic), y = mean, fill = factor(topic))) +  # Convertir topic en factor para colores
+  geom_col() +  # Gráfico de barras
+  facet_wrap(~ medio) +  # Facetas por medio
+  theme_minimal() +  # Estilo limpio
+  labs(
+    title = "Tópicos más relevantes por medio",
+    x = "Tópico",
+    y = "mean",
+    fill = "Tópico"
+  ) + scale_fill_discrete(labels = topic_labels) + 
+  theme(
+    axis.text.x = element_text(hjust = 0.5),  # Rotar etiquetas del eje X
+    strip.text = element_text(face = "bold"),  # Destacar los títulos de las facetas
+    legend.position = "bottom"  # Ubicar la leyenda abajo
+  )
+
+# Mostrar gráfico
+print(p)
 ```
 
 

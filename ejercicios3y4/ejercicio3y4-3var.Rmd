@@ -245,14 +245,14 @@ Consigna 4: Diseñar un prompt para que Gemini (el LLM que usamos en clase) para
 ```{r}
 library(gemini.R)
 ```
-
+Acá se le pone la api key
 ```{r}
 api<-""
 setAPI(api)
 ```
-
+Prompt 1 (modo zero shot prompting, no se le da ningún ejemplo de las categorias)
 ```{r}
-prompt <- "A continuación vas a recibir un texto de una nota periodística.
+prompt1 <- "A continuación vas a recibir un texto de una nota periodística.
   Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:
 
 -conservador: la nota indica una postura conservadora
@@ -265,18 +265,63 @@ Este es el texto:"
 
 ```
 
+Prompt 2 (modo few shot prompting, se le da un ejemplo de cada categoria)
 ```{r}
-base_gem<-bmodelo_filt
-base_gem<-base_gem %>% 
-  mutate(pred=NA)
+unique(bmodelo_filt$orientacion)
+# Obtener valores únicos de la columna 'orientacion'
+unique(bmodelo_filt$orientacion)
+
+# Filtrar por orientación conservadora
+conservadores <- bmodelo_filt %>% 
+  filter(orientacion == "+ conservador")
+ej_conservador <- conservadores$orientacion[2]
+
+# Filtrar por orientación progresista
+progresistas <- bmodelo_filt %>% 
+  filter(orientacion == "+ progresista")
+ej_progresista <- progresistas$orientacion[2]
+
+# Filtrar por orientación neutra
+neutros <- bmodelo_filt %>% 
+  filter(orientacion == "neutro")
+ej_neutro <- neutros$orientacion[2]  # Corregí el nombre de la variable
+
+# Construir el prompt correctamente
+prompt2 <- paste(
+  "A continuación vas a recibir un texto de una nota periodística.",
+  "Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:",
+  "",
+  "- conservador",
+  "- progresista",
+  "- neutro",
+  "",
+  "Este es un ejemplo conservador:", ej_conservador, 
+  "Este es un ejemplo progresista:", ej_progresista, 
+  "Este es un ejemplo neutro:", ej_neutro, 
+  "",
+  "No justifiques tu respuesta, ni des información adicional, sólo contesta con una de estas tres categorías: conservador, progresista y neutro.",
+  "",
+  "Este es el texto:"
+)
+
 
 ```
 
+Se le agrega a la base una columna pred que alojará las predicciones de gemini
+```{r}
+base_gem <- bmodelo_filt %>% 
+  slice_sample(n = 800) %>% 
+  mutate(pred = NA)
+
+
+```
+
+A continuación se hacen llamadas iterativas a gemini. Se puede usar "prompt1" (zero shot) o "prompt2" (few shot) según lo que se quiera probar
 ```{r}
 
 for (i in 1:nrow(base_gem)){
                 cat("Procesando noticia", i, "de", nrow(base_gem), "\n")
-                rta <- gemini(paste0(prompt, base_gem$texto[i]))
+                rta <- gemini(paste0(prompt1, base_gem$texto[i]))
                 base_gem$pred[i]=rta
                 Sys.sleep(4.5)
                 }

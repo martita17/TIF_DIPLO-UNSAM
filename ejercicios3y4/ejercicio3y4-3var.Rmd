@@ -196,7 +196,7 @@ glimpse(preds_embed)
 ```
 
 
-Sacamos métricas del modelo en una tabla      
+Sacamos métricas del modelo en una tabla. Es una gt que se exporta a png para poder usarla en el informe      
 ```{r}
 library(webshot2)
 library(gt)
@@ -247,7 +247,7 @@ library(gemini.R)
 ```
 
 ```{r}
-api<-"AIzaSyCeLbu-Z1clgyHc8XCJpsbr-0JmENLZxpw"
+api<-""
 setAPI(api)
 ```
 
@@ -283,7 +283,7 @@ for (i in 1:nrow(base_gem)){
 
 
 ```
-Convierto valores de orientacion para poder compararlos con las predicciones
+Normalizo y factorizo valores de orientacion y prediccion para poder compararlos 
 ```{r}
 base_gem_reg <- base_gem %>%
   mutate(orientacion = case_when(

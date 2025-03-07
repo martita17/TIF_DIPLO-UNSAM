@@ -257,7 +257,7 @@ library(gemini.R)
 ```
 Acá se le pone la api key
 ```{r}
-api<-"AIzaSyCeLbu-Z1clgyHc8XCJpsbr-0JmENLZxpw"
+api<-""
 setAPI(api)
 ```
 Prompt 1 (modo zero shot prompting, no se le da ningún ejemplo de las categorias)

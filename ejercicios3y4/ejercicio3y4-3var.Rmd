@@ -118,7 +118,7 @@ test_embed <- testing(notas_split)
 
 ```
 
- A continuación eligo el modelo, en esta caso progresión logarítmica tipo lasso. 
+ A continuación eligo el modelo, en esta caso regresion multinomial. 
 ```{r modelo}
 lasso_spec <- multinom_reg(
         penalty = tune(),
@@ -127,7 +127,7 @@ lasso_spec <- multinom_reg(
         set_engine("glmnet",maxit = 200000)
 ```
  
- A continuación seteos varios: construyo un recipe y un workflow y una grilla de hiperparámetros, esta le indicará distintas combinaciones de parámetros, así nos quedamos con la que mejor funciona. También seteo la validación cruzada
+ A continuación seteos varios: construyo un recipe y un workflow y una grilla de hiperparámetros, esta le indicará distintas combinaciones de hiparámetros, así nos quedamos con la que mejor funciona. También seteo la validación cruzada
 ```{r}
 library(themis)
 notas_rec_embed <-
@@ -186,13 +186,23 @@ fitted_lasso_embed <- fit(final_params_lasso_embed, train_embed)
 Hacemos el testeo con mejor modelo que teníamos
 ```{r}
 preds_embed <- test_embed %>%
-        select(orientacion) %>%
+        select(id,orientacion) %>%
         bind_cols(predict(fitted_lasso_embed, test_embed, type="prob")) %>%
         bind_cols(predict(fitted_lasso_embed, test_embed, type="class"))
 ```
 
 ```{r}
 glimpse(preds_embed)
+```
+
+Chequeo manual de algunas predicciones (falsos positivos)
+
+```{r}
+registro <- base_modelo %>%
+  filter(id == 	6952) 
+
+
+unique(registro$texto)
 ```
 
 
@@ -211,7 +221,7 @@ select(-.estimator)
   gt() %>%
   tab_header(
     title = md("Métricas de performance"),  
-    subtitle = paste("Regresión logística con tópico", topico, "**"))%>%
+    subtitle = paste("Regresión logística con tópico", topico))%>%
   cols_label(
     .metric = md("**Metrica**"),   # Rename .metric to "Metric" (bold)
     .estimate = md("**Estimado**") # Rename .estimate to "Estimate" (bold)
@@ -220,7 +230,7 @@ select(-.estimator)
 
 gtsave(tabla, "tabla_topico4_conmedio.png")
 ```
-Tabla con las métricas del modelo
+Hacemos un gráfico de las curvas ROC
 ```{r}
 roc_curve_data <- roc_curve(preds_embed, orientacion, `.pred_+ conservador`, `.pred_+ progresista`, `.pred_neutro`)
 ggplot(roc_curve_data, aes(x = 1 - specificity, y = sensitivity, color = .level)) +
@@ -228,7 +238,7 @@ ggplot(roc_curve_data, aes(x = 1 - specificity, y = sensitivity, color = .level)
   geom_abline(linetype = "dashed", color = "gray") +  # Add diagonal reference line
   theme_minimal() +
   labs(
-    title = paste("Curva ROC - Regresión logística con tópico", topico),
+    title = paste("Curva ROC - Regresión logística con tópico", topico,"(medio incluido en la base)"),
     x = "1 - Specificity",
     y = "Sensitivity",
     color = "Class"
@@ -247,7 +257,7 @@ library(gemini.R)
 ```
 Acá se le pone la api key
 ```{r}
-api<-""
+api<-"AIzaSyCeLbu-Z1clgyHc8XCJpsbr-0JmENLZxpw"
 setAPI(api)
 ```
 Prompt 1 (modo zero shot prompting, no se le da ningún ejemplo de las categorias)
@@ -265,28 +275,26 @@ Este es el texto:"
 
 ```
 
-Prompt 2 (modo few shot prompting, se le da un ejemplo de cada categoria)
+
+Prompt 2 (modo few shot prompting, se le da un ejemplo de cada categoria). Para eso, primer se extraen ejemplos
 ```{r}
 unique(bmodelo_filt$orientacion)
-# Obtener valores únicos de la columna 'orientacion'
-unique(bmodelo_filt$orientacion)
 
-# Filtrar por orientación conservadora
 conservadores <- bmodelo_filt %>% 
   filter(orientacion == "+ conservador")
-ej_conservador <- conservadores$orientacion[2]
+ej_conservador <- conservadores$texto[2]
 
-# Filtrar por orientación progresista
+
 progresistas <- bmodelo_filt %>% 
   filter(orientacion == "+ progresista")
-ej_progresista <- progresistas$orientacion[2]
+ej_progresista <- progresistas$texto[2]
 
-# Filtrar por orientación neutra
+
 neutros <- bmodelo_filt %>% 
   filter(orientacion == "neutro")
-ej_neutro <- neutros$orientacion[2]  # Corregí el nombre de la variable
+ej_neutro <- neutros$texto[2] 
 
-# Construir el prompt correctamente
+
 prompt2 <- paste(
   "A continuación vas a recibir un texto de una nota periodística.",
   "Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:",
@@ -299,13 +307,34 @@ prompt2 <- paste(
   "Este es un ejemplo progresista:", ej_progresista, 
   "Este es un ejemplo neutro:", ej_neutro, 
   "",
-  "No justifiques tu respuesta, ni des información adicional, sólo contesta con una de estas tres categorías: conservador, progresista y neutro.",
+  "Quisiera que expliques paso a paso tu razonamiento.",
+  "",
+  "La salida debería tener el siguiente formato:",
+  "",
+  "clasif: seguido de la clasificación",
+  "expl: seguido de la explicación",
   "",
   "Este es el texto:"
 )
 
+prompt2
 
 ```
+
+En caso de que en el prompt se pida explicación, se necesitan funciones para poder extraerlas, son estas:
+
+```{r}
+parse_clasif <- function(string){
+        clasif <- str_extract(string, "(?<=clasif: )\\S+")
+        return(clasif)
+}
+
+parse_expl <- function(string){
+        expl <- str_trim(str_replace_all(str_extract(string, "(?<=expl).*"), ":|'", ""))
+        return(expl)
+}
+```
+
 
 Se le agrega a la base una columna pred que alojará las predicciones de gemini
 ```{r}
@@ -321,46 +350,124 @@ A continuación se hacen llamadas iterativas a gemini. Se puede usar "prompt1" (
 
 for (i in 1:nrow(base_gem)){
                 cat("Procesando noticia", i, "de", nrow(base_gem), "\n")
-                rta <- gemini(paste0(prompt1, base_gem$texto[i]))
+                rta <- gemini(paste0(prompt2, base_gem$texto[i]))
                 base_gem$pred[i]=rta
                 Sys.sleep(4.5)
                 }
 
 
 ```
+En caso de que el prompt suponga explicación, se hacen los procesamiento necesarios para extraer tanto la clasificación como la explicación
+
+```{r}
+base_gem_sep <- base_gem %>% 
+  mutate(expl = parse_expl(pred),
+        clasif = parse_clasif(pred))
+  
+
+```
+
+Chequeo valores de clasif
+```{r}
+unique(base_gem_sep$clasif)
+```
+
+
 Normalizo y factorizo valores de orientacion y prediccion para poder compararlos 
 ```{r}
-base_gem_reg <- base_gem %>%
+base_gem_reg <- base_gem_sep %>%
   mutate(orientacion = case_when(
-    orientacion == "+ conservador" ~ "Conservador",
-    orientacion == "+ progresista" ~ "Progresista",
-    orientacion == "neutro" ~ "Neutro",
+    orientacion == "+ conservador" ~ "conservador",
+    orientacion == "+ progresista" ~ "progresista",
+    orientacion == "neutro" ~ "neutro",
     TRUE ~ orientacion
   )) %>% 
-   mutate(pred = trimws(pred)) %>%
-   mutate(pred = case_when(pred == "progresista" ~ "Progresista", TRUE ~ pred))%>%
+   mutate(clasif = trimws(clasif)) %>%
+    mutate(clasif = tolower(trimws(clasif))) %>%
+   mutate(clasif = case_when(clasif == "conservadora" ~ "conservador", TRUE ~ clasif))%>%
   mutate(orientacion=as.factor(orientacion)) %>%
-  mutate(pred=as.factor(pred)) %>% 
+  mutate(clasif=as.factor(clasif)) %>% 
   glimpse()
   
   
   
 ```
-
+Ultimo chequeo de compatibilidad de los valores
 ```{r}
-unique(base_gem_reg$pred)
+unique(base_gem_reg$clasif)
+unique(base_gem_reg$orientacion)
 ```
 
 
 
-Métricas de performance de gemini
+Métricas de performance de gemini. Se guardan en una tabla gt que se exporta como imágen para poder pegarla en el informe
 ```{r}
-metrics1_gem<-accuracy(base_gem_reg,orientacion,pred) %>%
-bind_rows(precision(base_gem_reg,orientacion,pred)) %>%
-bind_rows(recall(base_gem_reg,orientacion,pred)) %>%
-bind_rows(f_meas(base_gem_reg,orientacion,pred))
+library(gt)
+metrics1_gem<-accuracy(base_gem_reg,orientacion,clasif) %>%
+bind_rows(precision(base_gem_reg,orientacion,clasif)) %>%
+bind_rows(recall(base_gem_reg,orientacion,clasif)) %>%
+bind_rows(f_meas(base_gem_reg,orientacion,clasif)) %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance"),  
+    subtitle = paste("Few shot con LLM"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   
+    .estimate = md("**Estimado**") 
+  ) %>%
+  fmt_number(columns = vars(.estimate), decimals = 3) 
+
+gtsave(metrics1_gem, "tabla_gemini_prompt2.png")
 ```
+Matriz de confusión.
 ```{r}
-metrics2_gem<-conf_mat(base_gem_reg,orientacion,pred)
+library(yardstick)
+library(gt)
+
+metrics2_gem <- conf_mat(base_gem_reg, orientacion, clasif)
+  
+conf_matrix_table <- metrics2_gem$table
+conf_matrix_df <- as.data.frame(conf_matrix_table) %>% 
+  pivot_wider(names_from=Truth,values_from = Freq)
+  
+  
+```
+Se guardan en una tabla gt que se exporta como imágen para poder pegarla en el informe
+
+```{r}
+gt_table <- conf_matrix_df %>%
+  gt() %>%
+  tab_header(
+    title = "Matriz de confusión",
+    subtitle = "few shot con llm"
+  ) %>%
+  cols_label(
+    Prediction = "Prediction"
+  ) %>%
+  fmt_number(columns = everything(), decimals = 0) %>%  
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  tab_options(
+    table.width = pct(80),  
+    table.align = "center"
+  )
+
+
+for (i in 1:nrow(conf_matrix_df)) {
+  for (col in colnames(conf_matrix_df)[-1]) {  # Skip the first column (Prediction)
+    gt_table <- gt_table %>%
+      tab_style(
+        style = cell_fill(color = ifelse(conf_matrix_df$Prediction[i] == col, "lightgreen", "lightcoral")),
+        locations = cells_body(rows = i, columns = col)
+      )
+  }
+}
+gtsave(gt_table, "matconf_gemini_prompt2.png")
+gt_table
+
+
 ```
 

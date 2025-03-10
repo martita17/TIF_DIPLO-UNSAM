@@ -189,6 +189,19 @@ ap_top_terms15 %>%
   )+
   theme_minimal()
 ```
+```{r}
+#grafico nube de palabras
+install.packages("ggwordcloud")  
+library(ggwordcloud)
+ggplot(ap_top_terms12, aes(label = term, size = beta, color = factor(topic))) +
+  geom_text_wordcloud(area_corr = TRUE,  # Mejora la distribución evitando superposición
+                      rm_outside = TRUE) +  # Elimina palabras que quedan fuera del área
+  facet_wrap(~ topic, scales = "free") +  # Ajusta escalas para cada faceta
+  scale_size_area(max_size = 20) +  # Aumenta el tamaño de palabras más importantes
+   theme_minimal() 
+
+ggsave("nube_palabras2.png", width = 10, height = 6, dpi = 300)
+```
 
 
 Ahora testeamos o diferenciamos tópicos 5 y 10 de k12 con el logaritmo (NO LO HICIMOS)
@@ -201,6 +214,7 @@ dif_de_beta <- ap_topics12 %>%
   mutate(log_ratio5_10 = log2(topic5 / topic10))
 
 dif_de_beta %>% 
+  filter(!log_ratio5_10 ==Inf|log_ratio5_10 ==-Inf) %>% 
   slice_max(order_by = abs(log_ratio5_10), n = 10) %>%  
   ggplot(aes(x=reorder(term,log_ratio5_10) , y=log_ratio5_10)) +
     geom_col() +
@@ -262,13 +276,42 @@ gamma_medios <- doc_2_topics %>%
 #topicos principales por medio
 
 top_ppales <- gamma_medios %>%
-  group_by(medio) %>%          # Agrupar por medio
-  slice_max(order_by = mean, n = 2) %>%  # Seleccionar los 2 tópicos con mayor mean
-  ungroup()  # Desagrupar para evitar problemas en análisis posteriores
+  group_by(medio) %>%          
+  slice_max(order_by = mean, n = 2) %>%  
+  ungroup()  
 
+#tòpicos mas relevantes del corpus 
+topicos_relevantes <- doc_2_topics %>%
+  group_by(topic) %>%
+  summarise(mean_gamma = mean(gamma)) %>%  # Promedio de gamma por tópico
+  arrange(desc(mean_gamma))  # Ordenar de mayor a menor
 
 
 ```
+
+Creamos base para el ejercicio 3
+```{r} 
+base_ej3<- doc_2_topics %>% 
+  group_by(id) %>%       # Agrupar por documento
+  slice_max(order_by = gamma, n = 1) %>%  # Seleccionar la fila con el gamma más alto
+  ungroup()   
+
+write.csv(base_ej3, "base_ejercicio3.csv")
+```
+
+
+```{r}
+ggplot(topicos_relevantes, aes(x = mean_gamma, y = reorder(factor(topic), mean_gamma), fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  scale_y_discrete(labels = topic_labels) +  # Etiquetas correctas
+  labs(       x = "Promedio de Gamma",
+       y = "Tópico") +
+  theme_minimal()
+
+ggsave("topicos_relevantes.png", width = 10, height = 6, dpi = 300)
+```
+
+
 
 ```{r grafico gamma}
 graph_df <- gamma_medios
@@ -281,7 +324,6 @@ p<-graph_df %>%
   scale_fill_discrete(labels = topic_labels) + 
     theme_minimal()+
   labs(
-    title = "Tópicos por medio",
     x = "Tópico",
     y = "mean",
     fill = "Tópico"
@@ -292,20 +334,20 @@ p<-graph_df %>%
     legend.position = "bottom" )
     
  print(p)
- 
+ ggsave("topicos_por_medio.png", width = 10, height = 6, dpi = 300)
  topic_labels <- c(
-  "1" = "Identidad, usos y costumbres",
+  "1" = "Costumbres e interés gral.",
   "2" = "Derechos, educacion y salud",
-  "3" = "Politica Internacional",
+  "3" = "Política Internacional",
   "4" = "Elecciones nacionales",
   "5"= "Tecnologia y redes soc.",
-  "6"= "Chimento y Farandula",
+  "6"= "Chimento y Farándula",
   "7"= "Arte y espectaculos",
-  "8"= "Futbol",
+  "8"= "Fútbol y deportes",
   "9"= "Siniestros viales",
-  "10"= "Agricultura y ganaderia",
-  "11"= "Economia",
-  "12"= "Justicia y policiales"
+  "10"= "Agricultura y ganadería",
+  "11"= "Economía",
+  "12"= "Inseguridad y judiciales"
   )
  
  
@@ -317,18 +359,16 @@ p<-graph_df %>%
   geom_col() +  # Gráfico de barras
   facet_wrap(~ medio) +  # Facetas por medio
   theme_minimal() +  # Estilo limpio
-  labs(
-    title = "Tópicos más relevantes por medio",
-    x = "Tópico",
+  labs(    x = "Tópico",
     y = "mean",
     fill = "Tópico"
   ) + scale_fill_discrete(labels = topic_labels) + 
   theme(
-    axis.text.x = element_text(hjust = 0.5),  # Rotar etiquetas del eje X
+    axis.text.x = element_text(hjust = 0.5),  
     strip.text = element_text(face = "bold"),  # Destacar los títulos de las facetas
     legend.position = "bottom"  # Ubicar la leyenda abajo
   )
-
+ggsave("ppales_top_x_medio.png", width = 10, height = 6, dpi = 300)
 # Mostrar gráfico
 print(p)
 ```

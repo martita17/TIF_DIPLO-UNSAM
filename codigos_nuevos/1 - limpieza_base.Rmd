@@ -1,26 +1,35 @@
 ---
-title: "TRABAJO FINAL INTEGRADOR - Script de limpieza"
+title: "TRABAJO FINAL INTEGRADOR"
+subtitle: "Exploración y limpieza de datos"
 author: "Fauquié - Peiretti - Tapia Serrano"
 date: "`r Sys.Date()`"
-output: word_document
+output: 
+  html_document: 
+    theme: united
+    fig_width: 10
+    fig_height: 6
 ---
 
-Este documento contiene los código utilizados para realizar una primera aproximación exploratoria y una limpieza de la base de datos de noticias sobre la cual desarrollaremos nuestro Trabajo Final Integrador del Diploma en Ciencias Sociales Computacionales y Humanidades Digitales, de la UNSAM.
+Este documento contiene los código utilizados para realizar una primera aproximación exploratoria y una limpieza de la base de datos de noticias sobre la cual desarrollaremos nuestro Trabajo Final Integrador, en el marco del Diploma en Ciencias Sociales Computacionales y Humanidades Digitales, de la UNSAM.
 
-La primera parte de la limpieza se centrará en detectar observaciones que por algún motivo resulte conveniente eliminar de la base: porque están duplicadas, porque el texto de la noticia se ha perdido, por algún problema durante el scraping, etc. Esta primera limpieza resultará últil, a su vez, para conocer con mayor profundidad la estructura de la base de datos y sus características.
+La primera parte de la limpieza se centrará en detectar observaciones que por algún motivo resulte conveniente eliminar de la base. Esta primera limpieza resultará últil, a su vez, para conocer con mayor profundidad la estructura de la base de datos y sus características.
+
+<br>
 
 #### Carga de librerías y de la base
-```{r}
+```{r echo=TRUE, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(skimr)
 library(tidytext)
 library(dplyr)
 library(stringi)
+library(reactable)
 
-corpus_original <- read.csv(file = "bases/2024 M5_corpus_medios.csv")
-corpus_original <- as_tibble(corpus_original)
+corpus_original <- as_tibble(read.csv(file = "../bases/2024 M5_corpus_medios.csv"))
 head(corpus_original)
 ```
+
+<br>
 
 #### Exploración inicial
 ```{r}
@@ -43,6 +52,7 @@ corpus_original %>%
   select(id, url, titulo, texto) %>% 
   filter(duplicated(titulo, texto))
 ```
+
 El código anterior nos permite ver solamente la entrada de la base que figura como duplicada, sin ver el original. Esto será importante tenerlo en cuenta más adelante.
 Vemos, por su parte, que hay entradas que parecen estar duplicadas más de una vez, como la noticia sobre el fallecimiento de De la Rúa.
 Podemos estar seguros de que al eliminar estas observaciones duplicadas no estaríamos perdiendo noticias. Sin embargo, resulta necesario explorar otro tipo de duplicaciones que parecen existir.
@@ -88,7 +98,7 @@ Con este nuevo corpus limpio de casos duplicados estamos en condiciones de avanz
 
 ```{r}
 # Cargar stopwords en español
-stop_words <- read.csv(file = "bases/z_stopwords.txt")
+stop_words <- read.csv(file = "../bases/z_stopwords.txt")
 
 # Normalizamos el set de stopwords y eliminamos los duplicados que pueden generarse debido al paso anterior, como "el" y "él".
 stop_words <- stop_words %>% 
@@ -116,6 +126,8 @@ corpus_clean <- corpus_clean %>%
   )
 ```
 
+<br>
+
 #### Detectando otros problemas
 Tras la primer limpieza, realizamos una serie de exploraciones semi-manuales de la base de datos y encontramos dos problemas extras: el primero, que hay un conjunto de observaciones que no contienen noticias en sí, sino referencias a videos en redes sociales o tweets; el segundo, hay artículos que contienen errores en el scraping y en el campo texto encontramos la oración _article download failed_.
 Luego de varias pruebas, llegamos a la conclusión de que el primer tipo de problema podemos solucionarlo eliminando aquellas entradas cuyo texto no contenga más de 250 caracteres. Esto no nos asegura eliminar todos ellos, pero sí que limpiamos la amplia mayoría.
@@ -127,18 +139,22 @@ corpus_clean <- corpus_clean %>%
   filter(str_starts(texto_limpio, "article download failed") == F & caracteres_texto_limpio > 250)
 ```
 
+<br>
 
 #### Limpieza por medio
 En esta etapa, es importante tener en cuenta que, en ocasiones, al momento de realizar el scraping, traemos junto a los textos de las notas cierto contenido no deseado, que no forma parte del artículo en sí. Por este motivo, puede resultar interesante explorar el contenido de los artículos de manera separada para cada medio.
 
 En los hechos, para realizar el proceso de limpieza que a continuación compartimos como una sola línea de desarrollo, tuvimos que realizar varias idas y vuelta entre el texto original y el texto limpio.
 
-#### Partimos la base de datos en 8 subconjuntos que contienen las notas correspondientes a cada medio.
-```{r}
+**Partimos la base de datos en 8 subconjuntos que contienen las notas correspondientes a cada medio.**
+```{r message=FALSE}
 list2env(split(corpus_clean, corpus_clean$medio), envir = .GlobalEnv)
 ```
-#### Exploramos La Nación
-```{r}
+
+<br>
+
+**Exploramos La Nación**
+```{r message=FALSE}
 palabras_lanacion <- lanacion %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -158,9 +174,10 @@ lanacion <- lanacion %>%
 rm(palabras_lanacion)
 ```
 
+<br>
 
-#### Exploramos Clarín
-```{r}
+**Exploramos Clarín**
+```{r message=FALSE}
 palabras_clarin <- clarin %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -174,9 +191,10 @@ En principio no se detecta presencia de "texto basura". Se registra fuerte prese
 rm(palabras_clarin)
 ```
 
+<br>
 
-#### Exploramos Crónica 
-```{r}
+**Exploramos Crónica** 
+```{r message=FALSE}
 palabras_cronica <- cronica %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -213,9 +231,10 @@ cronica <- cronica %>%
 rm(palabras_cronica)
 ```
 
+<br>
 
-#### Exploramos Infobae
-```{r}
+**Exploramos Infobae**
+```{r message=FALSE}
 palabras_infobae <- infobae %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -230,8 +249,10 @@ Se repiten las mismas observaciones que para Clarín.
 rm(palabras_infobae)
 ```
 
-#### Exploramos Minuto Uno
-```{r}
+<br>
+
+**Exploramos Minuto Uno**
+```{r message=FALSE}
 palabras_minutouno <- minutouno %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -245,9 +266,10 @@ Se repiten las mismas observaciones que para Clarín y se detectan como palabras
 rm(palabras_minutouno)
 ```
 
+<br>
 
-#### Exloramos Página 12
-```{r}
+**Exloramos Página 12**
+```{r message=FALSE}
 palabras_pagina12 <- pagina12 %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -261,8 +283,10 @@ Se repiten las mismas observaciones que para Clarín.
 rm(palabras_pagina12)
 ```
 
-#### Exploramos Perfil
-```{r}
+<br>
+
+**Exploramos Perfil**
+```{r message=FALSE}
 palabras_perfil <- perfil %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -276,9 +300,10 @@ Se repiten las mismas observaciones que para Clarín.
 rm(palabras_perfil)
 ```
 
+<br>
 
-#### Exploramos Telam
-```{r}
+**Exploramos Telam**
+```{r message=FALSE}
 palabras_telam <- telam %>%
   unnest_tokens(output = word, 
                 input = texto_limpio) %>%
@@ -292,25 +317,29 @@ Se repiten las mismas observaciones que para Clarín.
 rm(palabras_telam)
 ```
 
+<br>
 
-#### Volvemos a unificar las bases y eliminamos los subsets de artículos por medio
+**Volvemos a unificar las bases y eliminamos los subsets de artículos por medio**
 ```{r}
 corpus_clean <- bind_rows(clarin, cronica, infobae, lanacion, minutouno, pagina12, perfil, telam)
 
 rm(clarin, cronica, infobae, lanacion, minutouno, pagina12, perfil, telam)
 ```
 
-#### Realizamos una limpieza de los nuevos _términos vacíos_ que hemos detectado
+Realizamos una limpieza de los nuevos _términos vacíos_ que hemos detectado
 ```{r}
 stop_words2 <- tibble(word = c("ano", "anos", "embed", "lunes", "martes",
                                "miercoles", "jueves", "viernes", "sabado",
                                "domingo", "otrx", "otrxs", "lxs",
                                # Imágenes
-                               "jpg", "jpeg", "jpe", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico", "heic", "avif",
+                               "jpg", "jpeg", "jpe", "png", "gif", "bmp",
+                               "tiff", "tif", "webp", "svg", "ico", "heic", "avif",
                                # Videos
-                               "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "mpeg", "mpg", "3gp", "m4v", "ogv",
+                               "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm",
+                               "mpeg", "mpg", "3gp", "m4v", "ogv",
                                # Audios
-                               "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus", "aiff", "amr"))
+                               "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a",
+                               "opus", "aiff", "amr"))
 
 corpus_clean <- corpus_clean %>% 
   rowwise() %>%
@@ -323,9 +352,10 @@ corpus_clean <- corpus_clean %>%
   )
 ```
 
+<br>
 
 #### Exportamos la nueva base
-```{r}
+```{r eval=FALSE}
 write.csv(corpus_clean, "bases/corpus_clean.csv", row.names = F)
 ```
 

@@ -1,0 +1,473 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidytext)
+
+```
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(textrecipes)
+```
+
+La base modelo finalmente lo que tiene que tener es los documentos (id y texto), con su respectiva orientacion. 
+```{r}
+base_original<-read.csv("C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/bases/corpus_clean.csv") %>% 
+  select(id,orientacion,texto,medio)
+topicos_X_doc<-read.csv("C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/bases/doc_2_topic.csv") %>% 
+  select(id,topic)
+```
+
+Unimos las bases y filtramos por tópico, nos quedamos con elecciones (4) y judiciales (12)
+
+```{r}
+base_modelo <- topicos_X_doc %>%   
+  left_join(base_original, by = "id" ) %>% 
+    filter(topic %in% c(4,12)) 
+```
+
+```{r}
+unique(base_modelo$topic)
+```
+
+
+Se revisa el balance de clases
+```{r}
+peso_clases<-base_modelo %>% 
+  group_by(topic,orientacion) %>% 
+  summarise(count=n(), .groups = "drop") %>% 
+  glimpse()
+```
+
+Para que la base funcione con los embeddings en español, es necesaria una limpieza más superficial: no se le quitan mayúsculas ni caractéres no ascii
+```{r}
+bmodelo_limpia <- base_modelo %>%
+        mutate(texto = str_replace_all(texto, "'//[.*?¿//]//%'", " ")) %>%
+        mutate(texto = str_replace_all(texto, "[[:digit:]]+", "DIGITO")) %>% 
+        mutate(medio = as.numeric(as.factor(medio)))
+        
+```
+
+Cargo los embeddings sugeridos
+```{r embeddings}
+load_embeddings <- function(path=NULL, type=c("w2v", "ft")){
+        if (type=="w2v"){
+                embedding <- word2vec::read.wordvectors(path, 
+                                                        type = "bin", 
+                                                        normalize = TRUE) %>%
+                        as_tibble(rownames="word")
+        }
+        else if (type=="ft"){
+                model <- fastTextR::ft_load(path)
+                words <- fastTextR::ft_words(model)
+                embedding <- fastTextR::ft_word_vectors(model,
+                                                        words) %>%
+                        as_tibble(rownames="word")
+        }
+        
+        return(embedding)
+}
+
+embedding <- load_embeddings(
+  path = "C:/Users/JGM/Documents/trabajo_final_diplomatura/TIF_DIPLO-UNSAM/bases/sbw_vectors.bin",
+  type = "w2v"
+)
+
+
+```
+
+De los dos tópicos preseleccionados, elijo uno. El valor elegido acá será el que se use para el código posterior, de esta manera se pueden hacer pruebas por tópico de manera más dinámica
+
+```{r}
+topico<-4
+```
+
+```{r}
+bmodelo_filt<-bmodelo_limpia %>% 
+  filter(topic == !!topico) %>% 
+  select(-topic)
+```
+
+tidy models me permite usar recipies también para construir la matriz de embeddings que será insumo para el modelo. Por lo que le indicamos...se tokenizará todo menos la columna id (que le estamos dando el rol de ID) y la columna orientacion.
+```{r recipe}
+notas_rec_embed <- recipe(orientacion ~ ., data = bmodelo_filt) %>%
+        update_role("id", new_role = "ID") %>% 
+        step_tokenize(texto) %>% 
+        step_word_embeddings(texto, 
+                             embeddings=embedding,
+                             aggregation = "mean")
+```
+
+Se aplica la receta
+```{r prep}
+tictoc::tic()
+not_embed <- notas_rec_embed %>% prep() %>% bake(bmodelo_filt)
+tictoc::toc()
+```
+
+Divido el dataset en validation, train y test para el modelo de progresion logaritmica
+```{r}
+set.seed(664)
+notas_split <- initial_split(not_embed, strata = orientacion)
+train_embed <- training(notas_split)
+test_embed <- testing(notas_split)
+
+```
+
+ A continuación eligo el modelo, en esta caso regresion multinomial. 
+```{r modelo}
+lasso_spec <- multinom_reg(
+        penalty = tune(),
+        mixture = 1) %>%
+        set_mode("classification") %>%
+        set_engine("glmnet",maxit = 200000)
+```
+ 
+ A continuación seteos varios: construyo un recipe y un workflow y una grilla de hiperparámetros, esta le indicará distintas combinaciones de hiparámetros, así nos quedamos con la que mejor funciona. También seteo la validación cruzada
+```{r}
+library(themis)
+notas_rec_embed <-
+        recipe(orientacion ~ ., data = train_embed) %>%
+        update_role("id", new_role = "ID") %>% 
+       step_upsample(orientacion)
+       
+
+
+wf_embed <- workflow() %>% 
+        add_recipe(notas_rec_embed) %>%
+        add_model(lasso_spec)
+
+
+grid_lasso <- grid_regular(penalty(), levels = 10)
+
+
+set.seed(234)
+embed_folds <- vfold_cv(train_embed, v = 5)
+
+```
+ 
+ Entrenamiento
+```{r}
+tictoc::tic()
+tune_lasso_embed <- tune_grid(
+        wf_embed,
+        embed_folds,
+        grid = grid_lasso,
+        control = control_resamples(save_pred = TRUE)
+)
+tictoc::toc()
+```
+ 
+```{r}
+show_best(tune_lasso_embed)
+```
+
+```{r}
+chosen_auc_embed <- tune_lasso_embed %>%
+  select_by_one_std_err(metric = "roc_auc", -penalty)
+
+chosen_auc_embed
+```
+
+```{r}
+final_params_lasso_embed <- finalize_workflow(wf_embed, chosen_auc_embed)
+final_params_lasso_embed
+
+```
+Corremos el mejor modelo
+```{r}
+fitted_lasso_embed <- fit(final_params_lasso_embed, train_embed)
+```
+
+Hacemos el testeo con mejor modelo que teníamos
+```{r}
+preds_embed <- test_embed %>%
+        select(id,orientacion) %>%
+        bind_cols(predict(fitted_lasso_embed, test_embed, type="prob")) %>%
+        bind_cols(predict(fitted_lasso_embed, test_embed, type="class"))
+```
+
+```{r}
+glimpse(preds_embed)
+```
+
+Chequeo manual de algunas predicciones (falsos positivos)
+
+```{r}
+registro <- base_modelo %>%
+  filter(id == 	6952) 
+
+
+unique(registro$texto)
+```
+
+
+Sacamos métricas del modelo en una tabla. Es una gt que se exporta a png para poder usarla en el informe      
+```{r}
+library(webshot2)
+library(gt)
+metricas_mod<-roc_auc(preds_embed, orientacion, `.pred_+ conservador`, `.pred_+ progresista`, `.pred_neutro`) %>%
+bind_rows(accuracy(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(precision(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(recall(preds_embed, orientacion, .pred_class)) %>%
+bind_rows(f_meas(preds_embed, orientacion, .pred_class)) %>% 
+select(-.estimator)
+  
+  tabla<-metricas_mod %>% 
+  gt() %>%
+  tab_header(
+    title = md("Métricas de performance"),  
+    subtitle = paste("Regresión logística con tópico", topico))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   # Rename .metric to "Metric" (bold)
+    .estimate = md("**Estimado**") # Rename .estimate to "Estimate" (bold)
+  ) %>%
+  fmt_number(columns = vars(.estimate), decimals = 3) 
+
+gtsave(tabla, "tabla_topico4_conmedio.png")
+```
+Hacemos un gráfico de las curvas ROC
+```{r}
+roc_curve_data <- roc_curve(preds_embed, orientacion, `.pred_+ conservador`, `.pred_+ progresista`, `.pred_neutro`)
+ggplot(roc_curve_data, aes(x = 1 - specificity, y = sensitivity, color = .level)) +
+  geom_line(size = 1.2) +
+  geom_abline(linetype = "dashed", color = "gray") +  # Add diagonal reference line
+  theme_minimal() +
+  labs(
+    title = paste("Curva ROC - Regresión logística con tópico", topico,"(medio incluido en la base)"),
+    x = "1 - Specificity",
+    y = "Sensitivity",
+    color = "Class"
+  )+
+  theme(
+    legend.position = "bottom"
+  )
+
+```
+
+
+Consigna 4: Diseñar un prompt para que Gemini (el LLM que usamos en clase) para realizar la tarea del punto anterior. Extraer una muestra de unos 800 articulos usados en el punto anterior y clasificarlos mediante Gemini. Comparar los resultados de ambos modelos. ¿Cuál funciona mejor? Generar las métricas y visualizaciones para comparar ambos modelos. ¿Cuáles podrían ser las causas de ambos comportamientos?
+
+```{r}
+library(gemini.R)
+```
+Acá se le pone la api key
+```{r}
+api<-""
+setAPI(api)
+```
+Prompt 1 (modo zero shot prompting, no se le da ningún ejemplo de las categorias)
+```{r}
+prompt1 <- "A continuación vas a recibir un texto de una nota periodística.
+  Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:
+
+-conservador: la nota indica una postura conservadora
+-progresista: la nota indica una postura progresista
+-neutro: la nota no da señales de ninguna postura. 
+
+No justifiques tu respuesta, ni des información adicional, sólo contesta con una de estas tres categorias: conservador, progresista y neutro
+
+Este es el texto:"
+
+```
+
+
+Prompt 2 (modo few shot prompting, se le da un ejemplo de cada categoria). Para eso, primer se extraen ejemplos
+```{r}
+unique(bmodelo_filt$orientacion)
+
+conservadores <- bmodelo_filt %>% 
+  filter(orientacion == "+ conservador")
+ej_conservador <- conservadores$texto[2]
+
+
+progresistas <- bmodelo_filt %>% 
+  filter(orientacion == "+ progresista")
+ej_progresista <- progresistas$texto[2]
+
+
+neutros <- bmodelo_filt %>% 
+  filter(orientacion == "neutro")
+ej_neutro <- neutros$texto[2] 
+
+
+prompt2 <- paste(
+  "A continuación vas a recibir un texto de una nota periodística.",
+  "Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:",
+  "",
+  "- conservador",
+  "- progresista",
+  "- neutro",
+  "",
+  "Este es un ejemplo conservador:", ej_conservador, 
+  "Este es un ejemplo progresista:", ej_progresista, 
+  "Este es un ejemplo neutro:", ej_neutro, 
+  "",
+  "Quisiera que expliques paso a paso tu razonamiento.",
+  "",
+  "La salida debería tener el siguiente formato:",
+  "",
+  "clasif: seguido de la clasificación",
+  "expl: seguido de la explicación",
+  "",
+  "Este es el texto:"
+)
+
+prompt2
+
+```
+
+En caso de que en el prompt se pida explicación, se necesitan funciones para poder extraerlas, son estas:
+
+```{r}
+parse_clasif <- function(string){
+        clasif <- str_extract(string, "(?<=clasif: )\\S+")
+        return(clasif)
+}
+
+parse_expl <- function(string){
+        expl <- str_trim(str_replace_all(str_extract(string, "(?<=expl).*"), ":|'", ""))
+        return(expl)
+}
+```
+
+
+Se le agrega a la base una columna pred que alojará las predicciones de gemini
+```{r}
+base_gem <- bmodelo_filt %>% 
+  slice_sample(n = 800) %>% 
+  mutate(pred = NA)
+
+
+```
+
+A continuación se hacen llamadas iterativas a gemini. Se puede usar "prompt1" (zero shot) o "prompt2" (few shot) según lo que se quiera probar
+```{r}
+
+for (i in 1:nrow(base_gem)){
+                cat("Procesando noticia", i, "de", nrow(base_gem), "\n")
+                rta <- gemini(paste0(prompt2, base_gem$texto[i]))
+                base_gem$pred[i]=rta
+                Sys.sleep(4.5)
+                }
+
+
+```
+En caso de que el prompt suponga explicación, se hacen los procesamiento necesarios para extraer tanto la clasificación como la explicación
+
+```{r}
+base_gem_sep <- base_gem %>% 
+  mutate(expl = parse_expl(pred),
+        clasif = parse_clasif(pred))
+  
+
+```
+
+Chequeo valores de clasif
+```{r}
+unique(base_gem_sep$clasif)
+```
+
+
+Normalizo y factorizo valores de orientacion y prediccion para poder compararlos 
+```{r}
+base_gem_reg <- base_gem_sep %>%
+  mutate(orientacion = case_when(
+    orientacion == "+ conservador" ~ "conservador",
+    orientacion == "+ progresista" ~ "progresista",
+    orientacion == "neutro" ~ "neutro",
+    TRUE ~ orientacion
+  )) %>% 
+   mutate(clasif = trimws(clasif)) %>%
+    mutate(clasif = tolower(trimws(clasif))) %>%
+   mutate(clasif = case_when(clasif == "conservadora" ~ "conservador", TRUE ~ clasif))%>%
+  mutate(orientacion=as.factor(orientacion)) %>%
+  mutate(clasif=as.factor(clasif)) %>% 
+  glimpse()
+  
+  
+  
+```
+Ultimo chequeo de compatibilidad de los valores
+```{r}
+unique(base_gem_reg$clasif)
+unique(base_gem_reg$orientacion)
+```
+
+
+
+Métricas de performance de gemini. Se guardan en una tabla gt que se exporta como imágen para poder pegarla en el informe
+```{r}
+library(gt)
+metrics1_gem<-accuracy(base_gem_reg,orientacion,clasif) %>%
+bind_rows(precision(base_gem_reg,orientacion,clasif)) %>%
+bind_rows(recall(base_gem_reg,orientacion,clasif)) %>%
+bind_rows(f_meas(base_gem_reg,orientacion,clasif)) %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance"),  
+    subtitle = paste("Few shot con LLM"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   
+    .estimate = md("**Estimado**") 
+  ) %>%
+  fmt_number(columns = vars(.estimate), decimals = 3) 
+
+gtsave(metrics1_gem, "tabla_gemini_prompt2.png")
+```
+Matriz de confusión.
+```{r}
+library(yardstick)
+library(gt)
+
+metrics2_gem <- conf_mat(base_gem_reg, orientacion, clasif)
+  
+conf_matrix_table <- metrics2_gem$table
+conf_matrix_df <- as.data.frame(conf_matrix_table) %>% 
+  pivot_wider(names_from=Truth,values_from = Freq)
+  
+  
+```
+Se guardan en una tabla gt que se exporta como imágen para poder pegarla en el informe
+
+```{r}
+gt_table <- conf_matrix_df %>%
+  gt() %>%
+  tab_header(
+    title = "Matriz de confusión",
+    subtitle = "few shot con llm"
+  ) %>%
+  cols_label(
+    Prediction = "Prediction"
+  ) %>%
+  fmt_number(columns = everything(), decimals = 0) %>%  
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  tab_options(
+    table.width = pct(80),  
+    table.align = "center"
+  )
+
+
+for (i in 1:nrow(conf_matrix_df)) {
+  for (col in colnames(conf_matrix_df)[-1]) {  # Skip the first column (Prediction)
+    gt_table <- gt_table %>%
+      tab_style(
+        style = cell_fill(color = ifelse(conf_matrix_df$Prediction[i] == col, "lightgreen", "lightcoral")),
+        locations = cells_body(rows = i, columns = col)
+      )
+  }
+}
+gtsave(gt_table, "matconf_gemini_prompt2.png")
+gt_table
+
+
+```
+

@@ -1,0 +1,250 @@
+---
+title: "prueba2_ejercicio3"
+output: html_document
+date: '`r Sys.Date()`'
+---
+#### Carga de librerías
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tidymodels)
+library(textrecipes)
+library(glmnet)
+library(webshot2)
+library(gt)
+
+```
+#### Carga de bases
+```{r}
+base_topicos <- read.csv(file = "../bases/base_ejercicio3.csv")
+base_notas <- read.csv(file = "../bases/corpus_clean.csv")
+```
+
+Detectamos que ambas bases tienen una longitud diferente. La base que contiene el principal tópico de cada nota tiene una observación más. Esto se debe a que la entrada con id _40158_ está duplicada debido a que a tomado el mismo porcentaje para dos tópicos diferentes.
+Realizo una revisión manual para remover el tópico que cobra menos sentido al momento de revisar el contenido del artículo. Habría que corregir la forma de generar la base de tópicos para forzar a que cuando hay empate, solamente traiga uno.
+Tras la limpieza, joineamos ambas bases y generamos sets según tópico para realizar pruebas.
+
+```{r}
+base_topicos <- base_topicos[-5292,]
+
+base_global <- base_notas %>% 
+  left_join(base_topicos, by = "id")
+
+base_global <- base_global %>% 
+  mutate(nom_topico = case_when(topic == 1 ~ "rel_ident",
+                                topic == 2 ~ "soc_ed_salud",
+                                topic == 3 ~ "pol_internac",
+                                topic == 4 ~ "elecciones_nac",
+                                topic == 5 ~ "tecno_redes",
+                                topic == 6 ~ "chimentos_farandula",
+                                topic == 7 ~ "arte_cult",
+                                topic == 8 ~ "fulbo",
+                                topic == 9 ~ "siniestros",
+                                topic == 10 ~ "agricultura_ganaderia",
+                                topic == 11 ~ "eco_pol_eco",
+                                topic == 12 ~ "seguridad_judiciales")
+         )
+
+base_porcentajes <- base_global %>% 
+  count(nom_topico) %>% 
+  mutate(porc_topic = round(n * 100 / sum(n), digits = 2))
+
+
+```
+Hemos elegido los tópicos 4 (elecciones) y 12 (judiciales), los cuales representan la mayor proporción de notas del set global: el primero con un 14,99% y el segundo con un 11,50%.
+
+Generamos las bases específicas para estos medios.
+
+```{r}
+topico4_elecciones_sin_neutro <- base_global %>% 
+  filter(nom_topico == "elecciones_nac", orientacion != "neutro") %>% 
+  select(id, orientacion, texto)
+
+topico4_elecciones_sin_neutro %>% 
+  count(orientacion)
+
+```
+
+
+Para que la base funcione con los embeddings en español, es necesaria una limpieza más superficial: no se le quitan mayúsculas ni caractéres no ascii
+```{r}
+topico4_elecciones_clean_sin_neutro <- topico4_elecciones_sin_neutro %>%
+  mutate(texto = str_replace_all(texto, "'\\[.*?¿\\]\\%'", " ")) %>%
+  mutate(texto = str_replace_all(texto, "[[:digit:]]+", "DIGITO"))
+
+```
+
+Cargo los embeddings sugeridos
+```{r embeddings}
+load_embeddings <- function(path=NULL, type=c("w2v", "ft")){
+        if (type=="w2v"){
+                embedding <- word2vec::read.wordvectors(path, 
+                                                        type = "bin", 
+                                                        normalize = TRUE) %>%
+                        as_tibble(rownames="word")
+        }
+        else if (type=="ft"){
+                model <- fastTextR::ft_load(path)
+                words <- fastTextR::ft_words(model)
+                embedding <- fastTextR::ft_word_vectors(model,
+                                                        words) %>%
+                        as_tibble(rownames="word")
+        }
+        
+        return(embedding)
+}
+
+embedding <- load_embeddings(
+  path = "../bases/sbw_vectors.bin",
+  type = "w2v"
+)
+
+
+```
+
+tidy models me permite usar recipies también para construir la matriz de embeddings que será insumo para el modelo. Por lo que le indicamos...se tokenizará todo menos la columna document (que le estamos dando el rol de ID) y la columna orientacion.
+```{r recipe}
+notas_rec_embed_sin_neutro <- recipe(orientacion ~ ., data = topico4_elecciones_clean_sin_neutro) %>%
+        update_role("id", new_role = "ID") %>% 
+        step_tokenize(texto) %>% 
+        step_word_embeddings(texto, 
+                             embeddings=embedding,
+                             aggregation = "mean")
+```
+
+Se aplica la receta
+```{r prep}
+tictoc::tic()
+not_embed_sin_neutro <- notas_rec_embed_sin_neutro %>% prep() %>% bake(topico4_elecciones_clean_sin_neutro)
+tictoc::toc()
+```
+
+Divido el dataset en validation, train y test para el modelo de progresion logaritmica
+```{r}
+set.seed(664)
+notas_split_sin_neutro <- initial_split(not_embed_sin_neutro, strata = orientacion)
+train_embed_sin_neutro <- training(notas_split_sin_neutro)
+test_embed_sin_neutro <- testing(notas_split_sin_neutro)
+
+```
+
+ A continuación eligo el modelo, en esta caso progresión logarítmica tipo lasso. 
+```{r modelo}
+# lasso_spec_multi <- multinom_reg(
+#         penalty = tune(),
+#         mixture = 1) %>%
+#         set_mode("classification") %>%
+#         set_engine("glmnet")
+
+lasso_spec_log_sin_neutro <- logistic_reg(
+        penalty = tune(),
+        mixture = 1) %>%
+        set_mode("classification") %>%
+        set_engine("glmnet")
+```
+ 
+A continuación seteos varios: construyo un recipe y un workflow y una grilla de hiperparámetros, esta le indicará distintas combinaciones de parámetros, así nos quedamos con la que mejor funciona. También seteo la validación cruzada
+```{r}
+notas_rec_embed_sin_neutro <-
+        recipe(orientacion ~ ., data = train_embed_sin_neutro) %>%
+        update_role(all_of(c("id")), new_role = "ID")
+
+
+wf_embed_sin_neutro <- workflow() %>% 
+        add_recipe(notas_rec_embed_sin_neutro) %>%
+        add_model(lasso_spec_log_sin_neutro)
+
+
+grid_lasso_sin_neutro <- grid_regular(penalty(), levels = 10)
+
+
+set.seed(234)
+embed_folds_sin_neutro <- vfold_cv(train_embed_sin_neutro, v = 5)
+
+
+```
+ 
+Entrenamiento
+```{r}
+tictoc::tic()
+tune_lasso_embed_sin_neutro <- tune_grid(
+        wf_embed_sin_neutro,
+        embed_folds_sin_neutro,
+        grid = grid_lasso_sin_neutro,
+        control = control_resamples(save_pred = TRUE)
+)
+tictoc::toc()
+```
+ 
+```{r}
+collect_metrics(tune_lasso_embed_sin_neutro)
+```
+ 
+ 
+ 
+```{r}
+show_best(tune_lasso_embed_sin_neutro) # muestra los 4 mejores por defecto
+```
+
+```{r}
+chosen_auc_embed_sin_neutro <- tune_lasso_embed_sin_neutro %>%
+  select_by_one_std_err(metric = "roc_auc", -penalty)
+
+chosen_auc_embed_sin_neutro
+```
+
+```{r}
+final_params_lasso_embed_sin_neutro <- finalize_workflow(wf_embed_sin_neutro, chosen_auc_embed_sin_neutro)
+final_params_lasso_embed_sin_neutro
+
+```
+Corremos el mejor modelo
+```{r}
+fitted_lasso_embed_sin_neutro <- fit(final_params_lasso_embed_sin_neutro, train_embed_sin_neutro)
+```
+
+Hacemos el testeo con mejor modelo que teníamos
+```{r}
+preds_embed_sin_neutro <- test_embed_sin_neutro %>%
+        select(id, orientacion) %>%
+        bind_cols(predict(fitted_lasso_embed_sin_neutro, test_embed_sin_neutro, type="prob")) %>%
+        bind_cols(predict(fitted_lasso_embed_sin_neutro, test_embed_sin_neutro, type="class"))
+```
+
+```{r}
+glimpse(preds_embed_sin_neutro)
+```
+
+
+Sacamos métricas del modelo       
+```{r}
+preds_embed_sin_neutro <- preds_embed_sin_neutro %>% 
+  rename(.pred_conservador = `.pred_+ conservador`,
+         .pred_progresista = `.pred_+ progresista`)
+
+metricas_sin_neutro <- roc_auc(preds_embed_sin_neutro, orientacion, `.pred_+ conservador`) %>%
+bind_rows(accuracy(preds_embed_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(precision(preds_embed_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(recall(preds_embed_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(f_meas(preds_embed_sin_neutro, orientacion, .pred_class))
+
+tabla_sin_neutro <- metricas_sin_neutro %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance - sin neutros"),  
+    subtitle = md("Regresión logística con tópico 4"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   # Rename .metric to "Metric" (bold)
+    .estimate = md("**Estimado**") # Rename .estimate to "Estimate" (bold)
+  ) %>%
+  fmt_number(columns = c(.estimate), decimals = 3) 
+
+tabla_sin_neutro$`_data`
+
+gtsave(tabla_sin_neutro, "../visualizaciones/regresion-log/tabla_topico4_sin_neutros.png")
+```
+
+
+
+

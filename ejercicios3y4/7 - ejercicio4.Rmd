@@ -1,7 +1,13 @@
 ---
-title: "Trabajo Final Integrador - Ejercicio 4"
-output: html_document
+title: "TRABAJO FINAL INTEGRADOR"
+subtitle: "Modelos predictivos - Gemini"
+author: "Fauquié - Peiretti - Tapia Serrano"
 date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: united
+    fig_width: 10
+    fig_height: 6
 ---
 
 Consigna 4: Diseñar un prompt para que Gemini (el LLM que usamos en clase) para realizar la tarea del punto anterior. Extraer una muestra de unos 800 articulos usados en el punto anterior y clasificarlos mediante Gemini. Comparar los resultados de ambos modelos. ¿Cuál funciona mejor? Generar las métricas y visualizaciones para comparar ambos modelos. ¿Cuáles podrían ser las causas de ambos comportamientos?

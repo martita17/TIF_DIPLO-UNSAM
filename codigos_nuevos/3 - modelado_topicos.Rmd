@@ -11,12 +11,10 @@ output:
 ---
 
 <br>
-
 **Consigna**
 ¿Cuáles son los tópicos principales en el corpus? ¿Pueden evidenciar diferencias en cada uno de los medios? Explicar qué método se utilizó para responder la pregunta, cuáles son los supuestos del mismo. Generar las visualizaciones más adecuadas para responder a las preguntas.
 
 <br>
-
 #### Carga de librerías y de base
 ```{r echo=TRUE, warning=FALSE, message=FALSE}
 library(tidyverse)
@@ -69,7 +67,7 @@ saveRDS(lda_17, "../bases/modelos-lda/modelo_lda17.rds", compress = "xz")
 
 <br>
 Para continuar con el ejercicio, cargamos los modelos ya calculados.
-Posteriormente, calculamos la matriz beta: problabilidad de palbras de aparecer en cada tópico.
+Posteriormente, calculamos la matriz beta: problabilidad de cada palbra de pertenecer a un determinado tópico.
 ```{r message=FALSE}
 lda7 <- readRDS("../bases/modelos-lda/modelo_lda7.rds")
 lda10 <- readRDS("../bases/modelos-lda/modelo_lda10.rds")
@@ -95,7 +93,7 @@ ap_topics17 <- tidy(lda17, matrix = "beta") %>%
 ```
 
 <br>
-Generamos pequeñas tablas para explorar las 10 palabras más importantes de cada tópico, para cada uno de los modelos.
+Generamos pequeñas tablas para explorar las 10 palabras más importantes de cada tópico, para cada uno de los modelos. El objetivo es identificar las palabras más representativas de cada tópico para poder nombrarlo y diferenciarlo del resto.
 ```{r }
 ap_top_terms7 <- ap_topics7 %>%
   group_by(topic) %>%
@@ -144,6 +142,8 @@ ap_top_terms7 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+
+# ggsave("../visualizaciones/LDA/ap_top_terms7.png", width = 10, height = 6, dpi = 300)
 ```
 
 <br>
@@ -159,7 +159,10 @@ ap_top_terms10 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+
+# ggsave("../visualizaciones/LDA/ap_top_terms10.png", width = 10, height = 6, dpi = 300)
 ```
+
 
 <br>
 **Modelo k12**
@@ -174,6 +177,8 @@ ap_top_terms12 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+
+# ggsave("../visualizaciones/LDA/ap_top_terms12.png", width = 10, height = 6, dpi = 300)
 ```
 
 <br>
@@ -189,6 +194,8 @@ ap_top_terms15 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+
+# ggsave("../visualizaciones/LDA/ap_top_terms15.png", width = 10, height = 6, dpi = 300)
 ```
 
 <br>
@@ -204,14 +211,16 @@ ap_top_terms17 %>%
     axis.text.x = element_text(size=6)
   )+
   theme_minimal()
+
+# ggsave("../visualizaciones/LDA/ap_top_terms17.png", width = 10, height = 6, dpi = 300)
 ```
 <br>
 Decidimos continuar trabajando con el modelo k12. A partir del mismo, probamos otro tipo de visualizaciones y exploraciones.
 
+<br>
 #### Nubes de palabras
 
-```{r}
-
+```{r message=FALSE}
 ggplot(ap_top_terms12, aes(label = term, size = beta, color = factor(topic))) +
   geom_text_wordcloud(area_corr = TRUE,  # Mejora la distribución evitando superposición
                       rm_outside = TRUE) +  # Elimina palabras que quedan fuera del área
@@ -219,143 +228,15 @@ ggplot(ap_top_terms12, aes(label = term, size = beta, color = factor(topic))) +
   scale_size_area(max_size = 20) +  # Aumenta el tamaño de palabras más importantes
    theme_minimal() 
 
-# ggsave("nube_palabras2.png", width = 10, height = 6, dpi = 300)
-```
-
-
-Ahora testeamos o diferenciamos tópicos 5 y 10 de k12 con el logaritmo (NO LO HICIMOS)
-
-```{r}
-dif_de_beta <- ap_topics12 %>%
-  mutate(topic = paste0("topic", topic)) %>%
-  pivot_wider(names_from = topic, values_from = beta) %>% 
-  filter(topic5 > .002 | topic10 > .002) %>%
-  mutate(log_ratio5_10 = log2(topic5 / topic10))
-
-dif_de_beta %>% 
-  filter(!log_ratio5_10 ==Inf|log_ratio5_10 ==-Inf) %>% 
-  slice_max(order_by = abs(log_ratio5_10), n = 10) %>%  
-  ggplot(aes(x=reorder(term,log_ratio5_10) , y=log_ratio5_10)) +
-    geom_col() +
-    coord_flip() +
-    labs(x='Término',
-         y='Log2 ratio topic5/topic10') +
-    theme_minimal()
-
-
-
-dif_de_beta %>%
-  slice_max(order_by = abs(log_ratio5_10), n = 20) %>%  # Filtra las 20 palabras más relevantes
-  ggplot(aes(x = reorder(term, log_ratio5_10), y = log_ratio5_10, fill = log_ratio5_10 > 0)) +
-  geom_col() +
-  scale_fill_manual(values = c("red", "steelblue"), guide = "none") +  # Rojo para negativos, azul para positivos
-  labs(
-    x = "Término",
-    y = "Log2 ratio topic5/topic10",
-    title = "Top 20 términos más relevantes entre Topic 5 y Topic 10"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  # Gira etiquetas para que no se solapen
-    axis.text.y = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5, face = "bold")
-  )
-
+# ggsave("../visualizaciones/LDA/nube_palabras2.png", width = 10, height = 6, dpi = 300)
 ```
 
 <br>
-#### Composiciones de tópicos por documento
-Ahora sacamos la matriz gama: topico por documento, luego promediamos los gammas para calcular probabilidad de que aparezca cada tópico. La matri gamma describe la probabilidad de cada nota de pertenecer a cada tópico...las probabilidades suman 100.
-```{r gamma, echo=FALSE}
-doc_2_topics <- tidy(modelo_lda12, matrix = "gamma")
+#### Nombrando tópicos
 
-doc_2_topics <- doc_2_topics %>%
-  mutate(gamma = round(gamma, 5),
-         id = as.integer(document),
-         .keep = "unused") %>%
-  arrange(id, desc(gamma))
-
-
-b_medios<-bd_clean %>% 
-  select(id,medio) 
-
-#còdigo para hacer exploraciones por tópico y documento. Lo utilizamos para auydarnos a dilucidar algunos tópicos que no terminaban de esclarecerse solo con el listado de palabras 
-doc_2_topics_filt <- doc_2_topics %>%
-  filter(topic == 1 & gamma > 0.7)
-registro <- bd_clean %>%
-  filter(id == 	4817)
-unique(registro$texto)
-
-# Entiendo que esta tabla refiere a la combinación de tópicos por medio. A la probabilidad de un tópico determinado de emrger en un medio específico. Pero no estoy seguro. calcula el promedio del peso del tópico (gamma) para cada medio de comunicación y lo expresa en porcentaje. Del total de topicos, se representa el peso de cada uno por medio (el porcentaje se representa sobre el total de topicos por medio, es decir, todos los topicos de cada medio suman 100)
-
-gamma_medios <- doc_2_topics %>%
-  left_join(b_medios%>% unique()) %>%
-  group_by(medio, topic) %>%
-  summarise(mean = mean(gamma)*100) 
-  
-#topicos principales por medio
-
-top_ppales <- gamma_medios %>%
-  group_by(medio) %>%          
-  slice_max(order_by = mean, n = 2) %>%  
-  ungroup()  
-
-#tòpicos mas relevantes del corpus 
-topicos_relevantes <- doc_2_topics %>%
-  group_by(topic) %>%
-  summarise(mean_gamma = mean(gamma)) %>%  # Promedio de gamma por tópico
-  arrange(desc(mean_gamma))  # Ordenar de mayor a menor
-
-
-```
-
-Creamos base para el ejercicio 3
-```{r} 
-base_ej3<- doc_2_topics %>% 
-  group_by(id) %>%       # Agrupar por documento
-  slice_max(order_by = gamma, n = 1) %>%  # Seleccionar la fila con el gamma más alto
-  ungroup()   
-
-write.csv(base_ej3, "base_ejercicio3.csv")
-```
-
-
+A partir de la exploración de las visualizaciones anteriores nos aventuramos a nombras nuestros tópicos.
 ```{r}
-ggplot(topicos_relevantes, aes(x = mean_gamma, y = reorder(factor(topic), mean_gamma), fill = factor(topic))) +
-  geom_col(show.legend = FALSE) +
-  scale_y_discrete(labels = topic_labels) +  # Etiquetas correctas
-  labs(       x = "Promedio de Gamma",
-       y = "Tópico") +
-  theme_minimal()
-
-ggsave("topicos_relevantes.png", width = 10, height = 6, dpi = 300)
-```
-
-
-
-```{r grafico gamma}
-graph_df <- gamma_medios
-graph_df$topic <- 
-  as.factor(graph_df$topic)
-p<-graph_df %>%
-   ggplot() +
-   geom_col(aes(x=topic, y=mean, fill=topic)) +
-    facet_wrap(~ medio)+
-  scale_fill_discrete(labels = topic_labels) + 
-    theme_minimal()+
-  labs(
-    x = "Tópico",
-    y = "mean",
-    fill = "Tópico"
-  ) +
-    theme(
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank(), 
-    legend.position = "bottom" )
-    
- print(p)
- ggsave("topicos_por_medio.png", width = 10, height = 6, dpi = 300)
- topic_labels <- c(
+topic_labels <- c(
   "1" = "Costumbres e interés gral.",
   "2" = "Derechos, educacion y salud",
   "3" = "Política Internacional",
@@ -369,13 +250,92 @@ p<-graph_df %>%
   "11"= "Economía",
   "12"= "Inseguridad y judiciales"
   )
- 
- 
 ```
-```{r}
 
- p <- top_ppales %>%
-  ggplot(aes(x = factor(topic), y = mean, fill = factor(topic))) +  # Convertir topic en factor para colores
+
+<br>
+#### Composiciones de tópicos por documento
+
+Ahora generamos una matriz a partir de los valores **gama**. La misma no permite conocer la probabilidad de que cada tópico emerja en cada nota o, en otras palabras, cuál es el tópico más probable de cada nota.
+```{r echo=FALSE, message=FALSE}
+doc_2_topics <- tidy(lda12, matrix = "gamma")
+
+doc_2_topics <- doc_2_topics %>%
+  mutate(gamma = round(gamma, 5),
+         id = as.integer(document),
+         .keep = "unused") %>%
+  select(3, 1, 2) %>% 
+  arrange(id, desc(gamma))
+```
+
+<br>
+Realizamos algunas pruebas a través de los valores gamma.
+```{r}
+# Calculamos la proporción que representa cada tópico (como tópico principal imputado a una nota) en el total del corpus.
+topicos_relevantes <- doc_2_topics %>%
+  group_by(topic) %>%
+  summarise(mean_gamma = mean(gamma*100)) %>%  # Promedio de gamma por tópico
+  arrange(desc(mean_gamma))  # Ordenar de mayor a menor
+```
+
+<br>
+Graficamos la distribución de tópicos para toda la base.
+```{r}
+ggplot(topicos_relevantes, aes(x = mean_gamma, y = reorder(factor(topic), mean_gamma), fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  scale_y_discrete(labels = topic_labels) +  # Etiquetas correctas
+  labs(       x = "Promedio de Gamma",
+       y = "Tópico") +
+  theme_minimal()
+
+# ggsave("../visualizaciones/LDA/topicos_relevantes.png", width = 10, height = 6, dpi = 300)
+```
+
+<br>
+Ahora nos proponemos calcular la representación de cada tópico, para cada medio.
+```{r}
+b_medios<-bd_clean %>% 
+  select(id,medio) 
+
+gamma_medios <- doc_2_topics %>%
+  left_join(b_medios, by = "id") %>%
+  group_by(medio, topic) %>%
+  summarise(mean = mean(gamma)*100) 
+  
+# Top2 topicos principales por medio
+top_topics_xmedio <- gamma_medios %>%
+  group_by(medio) %>%          
+  slice_max(order_by = mean, n = 2) %>%  
+  ungroup()  
+```
+
+<br>
+Y, por qué no, graficarlo
+```{r}
+gamma_medios%>%
+   ggplot() +
+   geom_col(aes(x=as.factor(topic), y=mean, fill=as.factor(topic))) +
+    facet_wrap(~ medio)+
+  scale_fill_discrete(labels = topic_labels) + 
+    theme_minimal()+
+  labs(
+    x = "Tópico",
+    y = "mean",
+    fill = "Tópico"
+  ) +
+    theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(), 
+    legend.position = "bottom" )
+    
+# ggsave("../visualizaciones/LDA/topicos_por_medio.png", width = 10, height = 6, dpi = 300)
+```
+
+<br>
+Ahora hacemos lo mismo, pero quedándonos solamente con los dos tópicos más relevantes para una visualización menos cargada.
+```{r}
+top_topics_xmedio %>%
+  ggplot(aes(x = as.factor(topic), y = mean, fill = as.factor(topic))) +  # Convertir topic en factor para colores
   geom_col() +  # Gráfico de barras
   facet_wrap(~ medio) +  # Facetas por medio
   theme_minimal() +  # Estilo limpio
@@ -388,8 +348,18 @@ p<-graph_df %>%
     strip.text = element_text(face = "bold"),  # Destacar los títulos de las facetas
     legend.position = "bottom"  # Ubicar la leyenda abajo
   )
-ggsave("ppales_top_x_medio.png", width = 10, height = 6, dpi = 300)
-# Mostrar gráfico
-print(p)
+# ggsave("../visualizaciones/LDA/ppales_top_x_medio.png", width = 10, height = 6, dpi = 300)
 ```
+
+
+#### Creamos base para el ejercicio 3
+```{r} 
+base_ej3<- doc_2_topics %>% 
+  group_by(id) %>%       # Agrupar por documento
+  slice_max(order_by = gamma, n = 1) %>%  # Seleccionar la fila con el gamma más alto
+  ungroup()   
+
+# write.csv(base_ej3, "base_ejercicio3.csv")
+```
+
 

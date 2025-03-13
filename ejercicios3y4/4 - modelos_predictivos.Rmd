@@ -18,11 +18,13 @@ Seleccionar las noticias vinculadas a algún tópico relevante (por ejemplo, “
 <br>
 Para la realización de este ejercicio arrancamos seleccionando los dos tópicos más nutridos de notas: 4- Elecciones nacionales y 12- Inseguridad y judiciales. Dado que nos encontramos con un problema multicategorial, la primera prueba la hicimos con un modelo de **regresión logística multinomial**.
 
-Dado que los resultados de la prueba no fueron buenos para ninguno de los dos modelos, decidimos probar otras estrategias tomando el tópico 4 como referencia (dado que es el que más observaciones tiene y sobre el que los resultados dieron apenas un poco mejor). Las pruebas que hicimos fueron:
+Dado que los resultados de la prueba no fueron buenos para ninguno de los dos tópicos, decidimos probar otras estrategias tomando el tópico 4 como referencia (dado que es el que más observaciones tiene y sobre el que los resultados dieron apenas un poco mejor). Las pruebas que hicimos fueron:
 
-[x] Regresión logística binomial (one vs all): calculamos 3 regresiones logísticas por separado, una para cada categoría. A partir de los resultados, determinamos la predicción poniendo a competir los porcentajes obtenidos para cada prueba.
+[x] Regresión logística binomial (one vs all): calculamos 3 regresiones logísticas por separado, una para cada categoría. A partir de los resultados, determinamos la predicción poniendo a competir los porcentajes obtenidos para cada prueba.*
 [x] Regresión logística binomial (one vs one): elminamos de la base las observaciones neutras y probamos un modelo de regresión logística que buscaba predecir entre notas _conservadoras_ o _progresistas_.
 [x] Random Forest: por último, con la intención de volver a probar un modelo que abordar el problema multicategorial en su conjunto, realizamos esta prueba.
+
+*Después se comprobó que este es el mismo procemimiento que implementa la regresión logística multinomial
 
 Arrancamos...
 
@@ -107,6 +109,7 @@ embedding <- load_embeddings(
 topico4_elecciones <- base_global %>% 
   filter(nom_topico == "elecciones nacionales") %>% 
   select(id, orientacion, texto)
+#write.csv(topico4_elecciones,"topico4_elecciones.csv")
 
 topico4_elecciones %>% 
   count(orientacion)
@@ -218,7 +221,7 @@ preds_embed_rm_t4 <- test_embed_t4 %>%
 glimpse(preds_embed_rm_t4)
 ```
 
-
+<br>
 Evaluamos el modelo: calculamos el roc_auc, el accuracy, el precision, el recall y f_meas. Además generamos una tabla gt para poder visualizar las métricas más comodamente.     
 ```{r message=FALSE}
 metricas_mod_rm_t4 <-

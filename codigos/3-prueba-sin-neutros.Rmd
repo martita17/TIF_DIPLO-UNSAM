@@ -1,0 +1,146 @@
+---
+title: "TRABAJO FINAL INTEGRADOR"
+subtitle: "Regresión logística - sin neutros"
+author: "Fauquié - Peiretti - Tapia Serrano"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: united
+    fig_width: 10
+    fig_height: 6
+---
+
+#### Cargamos librerías y bases
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tidymodels)
+library(textrecipes)
+library(glmnet)
+library(webshot2)
+library(gt)
+
+topico4_elecciones <- read.csv(file = "../bases/topico4_elecciones.csv", row.names = 1)
+tune_penalty <- readRDS(file = "../bases/tune-penalty-t4.rds")
+```
+
+<br>
+Repetimos la misma limpieza/normalización que realizamos para la regresión logística multinomial para el texto de las notas. Además, quitamos los casos cuyo medio ha sido etiquetado como neutro en su orientación.
+```{r}
+topico4_sin_neutro <- topico4_elecciones %>%
+  filter(orientacion != "neutro") %>% 
+  mutate(texto = str_replace_all(texto, "'\\[.*?¿\\]\\%'", " ")) %>%
+  mutate(texto = str_replace_all(texto, "[[:digit:]]+", "DIGITO"))
+```
+
+<br>
+Cargamos los embeddings sugeridos.
+```{r message=FALSE}
+load_embeddings <- function(path=NULL, type=c("w2v", "ft")){
+        if (type=="w2v"){
+                embedding <- word2vec::read.wordvectors(path, 
+                                                        type = "bin", 
+                                                        normalize = TRUE) %>%
+                        as_tibble(rownames="word")
+        }
+        else if (type=="ft"){
+                model <- fastTextR::ft_load(path)
+                words <- fastTextR::ft_words(model)
+                embedding <- fastTextR::ft_word_vectors(model,
+                                                        words) %>%
+                        as_tibble(rownames="word")
+        }
+        
+        return(embedding)
+}
+
+embedding <- load_embeddings(
+  path = "../bases/sbw_vectors.bin",
+  type = "w2v"
+)
+```
+
+<br>
+Utilizamos, nuevamente, el flujo de tidymodels para calcular la base de embeddings para nuestro set.
+Repetimos este paso, pero sin realizar PCA. Luego aplicamos la receta.
+```{r}
+t4_rl_sin_neutro <- recipe(orientacion ~ ., data = topico4_sin_neutro) %>%
+        update_role("id", new_role = "ID") %>% 
+        step_tokenize(texto) %>% 
+        step_word_embeddings(texto, 
+                             embeddings=embedding,
+                             aggregation = "mean")
+
+tictoc::tic()
+notas_embed_sin_neutro <- t4_rl_sin_neutro %>% prep() %>% bake(topico4_sin_neutro)
+tictoc::toc()
+```
+
+<br>
+Dividimos el dataset en base de testeo y base de entrenamiento.
+```{r}
+set.seed(664)
+notas_split_sin_neutro <- initial_split(notas_embed_sin_neutro, strata = orientacion)
+train_embed_sin_neutro <- training(notas_split_sin_neutro)
+test_embed_sin_neutro <- testing(notas_split_sin_neutro)
+
+```
+
+<br>
+Construimos nuestro modelo de regresión logística para predecir si cada observación es conservadora o progresista (=no conservadora). 
+```{r}
+reg_log_sin_neutro <- logistic_reg(
+        penalty = tune(),
+        mixture = 1) %>%
+        set_mode("classification") %>%
+        set_engine("glmnet")
+
+t4_sin_neutro_rec <-
+        recipe(orientacion ~ ., data = train_embed_sin_neutro) %>%
+        update_role(all_of(c("id")), new_role = "ID")
+
+wf_embed_sin_neutro <- workflow() %>% 
+        add_recipe(t4_sin_neutro_rec) %>%
+        add_model(reg_log_sin_neutro)
+
+final_wf_sin_neutro <- finalize_workflow(wf_embed_sin_neutro, tune_penalty)
+
+fitted_sin_neutro <- fit(final_wf_sin_neutro, train_embed_sin_neutro)
+
+preds_sin_neutro <- test_embed_sin_neutro %>%
+        select(id, orientacion) %>%
+        bind_cols(predict(fitted_sin_neutro, test_embed_sin_neutro, type="prob")) %>%
+        bind_cols(predict(fitted_sin_neutro, test_embed_sin_neutro, type="class"))
+
+glimpse(preds_sin_neutro)
+```
+ 
+<br>
+Sacamos métricas del modelo       
+```{r}
+preds_sin_neutro <- preds_sin_neutro %>% 
+  rename(.pred_conservador = `.pred_+ conservador`,
+         .pred_progresista = `.pred_+ progresista`)
+
+metricas_sin_neutro <- roc_auc(preds_sin_neutro, orientacion, .pred_conservador) %>%
+bind_rows(accuracy(preds_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(precision(preds_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(recall(preds_sin_neutro, orientacion, .pred_class)) %>%
+bind_rows(f_meas(preds_sin_neutro, orientacion, .pred_class))
+
+tabla_sin_neutro <- metricas_sin_neutro %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance - sin neutros"),  
+    subtitle = md("Regresión logística con tópico 4"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),
+    .estimate = md("**Estimado**")
+  ) %>%
+  fmt_number(columns = c(.estimate), decimals = 3) 
+
+#gtsave(tabla_sin_neutro, "../visualizaciones/metricas-modelos/Nuevas/tabla_topico4_sin_neutros.png")
+
+tabla_sin_neutro
+```

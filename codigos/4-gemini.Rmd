@@ -1,0 +1,249 @@
+---
+title: "TRABAJO FINAL INTEGRADOR"
+subtitle: "Modelos predictivos - Gemini"
+author: "Fauquié - Peiretti - Tapia Serrano"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: united
+    fig_width: 10
+    fig_height: 6
+---
+<br>
+**Consigna**
+Diseñar un prompt para Gemini (el LLM que usamos en clase), para realizar la tarea del punto anterior. Extraer una muestra de unos 800 articulos usados en el punto anterior y clasificarlos mediante Gemini. Comparar los resultados de ambos modelos. ¿Cuál funciona mejor? Generar las métricas y visualizaciones para comparar ambos modelos. ¿Cuáles podrían ser las causas de ambos comportamientos?
+
+<br>
+Para la realización de este ejercicio trabajamos con las notas correspondientes al tópico 4 aprovechando la base generada en el ejercicio anterior (topico4_elecciones). Se usaron sin embargo sólo 800 observaciones. Las pruebas que hicimos fueron: 
+
+[x] Zero shot classification: Se hizo un prompt que NO daba ejemplos de las categorías y esperaba que el modelo "a ciegas" clasificara cada texto en  _conservadora_,  _neutra_ o _progresista_.
+[x] Few shot classification: Se extrajeron de la base ejemplos de cada una de las categorías y se introdujeron en el prompt para que el modelo tuviese referencias para la clasificación.
+
+Arrancamos...
+
+#### Cargamos librerías y bases
+<br>
+```{r}
+library(gemini.R)
+library(gt)
+library(yardstick)
+topico4_elecciones<-read.csv("../bases/topico4_elecciones.csv")
+```
+<br>
+Hacemos autenticación en la API de Gemini con una api key generada de antemano
+```{r}
+api<-""
+setAPI(api)
+```
+<br>
+Hacemos una selección de sólo 800 observaciones de la base. También agregamos una columna vacía pred en la que se albergarán las respuestas de Gemini. 
+```{r}
+topico4_gem <- topico4_elecciones %>% 
+  slice_sample(n = 800) %>% 
+  mutate(pred = NA)
+```
+<br>
+#### Prompts
+<br>
+A continuación el prompt para zero shot prompting. No le damos ningún ejemplo de las categorías y simplemente le pedimos al modelo que categorice los textos y que justifique su respuesta. 
+<br>
+```{r}
+prompt1 <- "A continuación, vas a recibir un texto de una nota periodística. 
+Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:
+
+- **conservador**: la nota indica una postura conservadora.  
+- **progresista**: la nota indica una postura progresista.  
+- **neutro**: la nota no da señales de ninguna postura.  
+
+Quisiera que expliques paso a paso tu razonamiento.  
+
+La salida debería tener el siguiente formato:
+
+- **clasif:** seguido de la clasificación.  
+- **expl:** seguido de la explicación.  
+
+Este es el texto:"
+
+```
+<br>
+A continuación el prompt para few shot prompting. Para poder armarlo, primero extraemos de la base un ejemplo de cada tipo de categoría. Luego ensamblamos el prompt inclustándole dichos ejemplos, para que el modelo pueda tener referencias. Le pedimos al modelo que categorice los textos y que justifique su respuesta.
+<br>
+```{r}
+unique(topico4_gem$orientacion)
+
+conservadores <- topico4_gem %>% 
+  filter(orientacion == "+ conservador")
+ej_conservador <- conservadores$texto[2]
+
+
+progresistas <- topico4_gem %>% 
+  filter(orientacion == "+ progresista")
+ej_progresista <- progresistas$texto[2]
+
+
+neutros <- topico4_gem %>% 
+  filter(orientacion == "neutro")
+ej_neutro <- neutros$texto[2] 
+
+
+prompt2 <- paste(
+  "A continuación vas a recibir un texto de una nota periodística.",
+  "Quisiera que la clasifiques como conservadora, progresista o neutra usando las siguientes categorías:",
+  "",
+  "- conservador",
+  "- progresista",
+  "- neutro",
+  "",
+  "Este es un ejemplo conservador:", ej_conservador, 
+  "Este es un ejemplo progresista:", ej_progresista, 
+  "Este es un ejemplo neutro:", ej_neutro, 
+  "",
+  "Quisiera que expliques paso a paso tu razonamiento.",
+  "",
+  "La salida debería tener el siguiente formato:",
+  "",
+  "clasif: seguido de la clasificación",
+  "expl: seguido de la explicación",
+  "",
+  "Este es el texto:"
+)
+
+
+
+```
+<br>
+#### Funciones de limpieza
+<br>
+Al los prompts incorporar explicación sobre la clasificación, precisamos de un procesamiento especial. Para ello empleamos dos funciones que, aprovechando los marcadores "clasif" y "expl" indicados en los prompts, pueden extraer clasificación y explicación de la respuesta del modelo.  
+<br>
+```{r}
+parse_clasif <- function(string){
+        clasif <- str_extract(string, "(?<=clasif: )\\S+")
+        return(clasif)
+}
+
+parse_expl <- function(string){
+        expl <- str_trim(str_replace_all(str_extract(string, "(?<=expl).*"), ":|'", ""))
+        return(expl)
+}
+```
+<br>
+#### Generación de predicciones
+<br>
+Iteramos por cada una de las filas de la base (topico4_gem) y en cada iteración, le pasamos a Gemini el prompt elegido (prompt1 o prompt2) con el respectivo artículo. La respuesta la albergamos en la columna pred
+<br>
+```{r}
+
+for (i in 1:nrow(topico4_gem)){
+                cat("Procesando noticia", i, "de", nrow(topico4_gem), "\n")
+                rta <- gemini(paste0(prompt2, base_gem$texto[i]))
+                topico4_gem$pred[i]=rta
+                Sys.sleep(4.5)
+                }
+
+
+```
+<br>
+#### Limpieza de la base para evaluar el modelo
+<br>
+Se hacen los procesamiento necesarios para extraer tanto la clasificación como la explicación usando las funciones parse_clasif y parse_expl. Estas extracciones se albergan en nuevas columnas
+<br>
+```{r}
+top4_gem_sep <- topico4_gem %>% 
+  mutate(expl = parse_expl(pred),
+        clasif = parse_clasif(pred))
+  
+
+```
+<br>
+Normalizamos y factorizamos valores de columna orientacion y de columna clasif para que puedan ser comparables 
+<br>
+```{r}
+top4_gem_reg <- top4_gem_sep %>%
+  mutate(orientacion = case_when(
+    orientacion == "+ conservador" ~ "conservador",
+    orientacion == "+ progresista" ~ "progresista",
+    orientacion == "neutro" ~ "neutro",
+    TRUE ~ orientacion
+  )) %>% 
+   mutate(clasif = trimws(clasif)) %>%
+    mutate(clasif = tolower(trimws(clasif))) %>%
+   mutate(clasif = case_when(clasif == "conservadora" ~ "conservador", TRUE ~ clasif))%>%
+  mutate(orientacion=as.factor(orientacion)) %>%
+  mutate(clasif=as.factor(clasif)) %>% 
+  glimpse()
+  
+  
+  
+```
+<br>
+#### Evaluación del modelo
+<br>
+Comparando columnas orientación y clasif, calculamos accuracy, precision, recall y f_meas. Estas métricas las volcamos sobre una tabla gt para mejor visualización 
+<br>
+```{r}
+metrics1_gem<-accuracy(top4_gem_reg,orientacion,clasif) %>%
+bind_rows(precision(top4_gem_reg,orientacion,clasif)) %>%
+bind_rows(recall(top4_gem_reg,orientacion,clasif)) %>%
+bind_rows(f_meas(top4_gem_reg,orientacion,clasif)) %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance"),  
+    subtitle = paste("Few shot con LLM"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   
+    .estimate = md("**Estimado**") 
+  ) %>%
+  fmt_number(columns = vars(.estimate), decimals = 3) 
+
+#gtsave(metrics1_gem, "tabla_gemini_prompt2.png")
+metrics1_gem
+```
+<br>
+Hacemos también una matriz de confusión.En esta caso también la volcamos sobre una tabla gt para mejor visualización 
+<br>
+```{r}
+
+metrics2_gem <- conf_mat(base_gem_reg, orientacion, clasif)
+  
+conf_matrix_table <- metrics2_gem$table
+conf_matrix_df <- as.data.frame(conf_matrix_table) %>% 
+  pivot_wider(names_from=Truth,values_from = Freq)
+
+gt_table <- conf_matrix_df %>%
+  gt() %>%
+  tab_header(
+    title = "Matriz de confusión",
+    subtitle = "few shot con llm"
+  ) %>%
+  cols_label(
+    Prediction = "Prediction"
+  ) %>%
+  fmt_number(columns = everything(), decimals = 0) %>%  
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  tab_options(
+    table.width = pct(80),  
+    table.align = "center"
+  )
+
+
+for (i in 1:nrow(conf_matrix_df)) {
+  for (col in colnames(conf_matrix_df)[-1]) {  # Skip the first column (Prediction)
+    gt_table <- gt_table %>%
+      tab_style(
+        style = cell_fill(color = ifelse(conf_matrix_df$Prediction[i] == col, "lightgreen", "lightcoral")),
+        locations = cells_body(rows = i, columns = col)
+      )
+  }
+}
+#gtsave(gt_table, "matconf_gemini_prompt2.png")
+gt_table
+
+  
+  
+```
+

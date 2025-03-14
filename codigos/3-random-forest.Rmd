@@ -1,0 +1,221 @@
+---
+title: "TRABAJO FINAL INTEGRADOR"
+subtitle: "Reandom Forest - Tópico 4"
+author: "Fauquié - Peiretti - Tapia Serrano"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: united
+    fig_width: 10
+    fig_height: 6
+---
+
+#### Cargamos librerías y bases
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tidymodels)
+library(textrecipes)
+library(glmnet)
+library(webshot2)
+library(gt)
+library(themis)
+library(ranger)
+
+topico4_elecciones <- read.csv(file = "../bases/topico4_elecciones.csv", row.names = 1)
+```
+
+<br>
+Modificamos las categorías (para mayor comodidad) y limpiamos el texto para pasarle los embeddings.
+```{r}
+topico4_elecciones <- topico4_elecciones %>% 
+  mutate(orientacion = case_when(orientacion == "+ conservador" ~ "conservador",
+                                 orientacion == "+ progresista" ~ "progresista",
+                                 TRUE ~ orientacion))
+
+topico4_elecciones_clean <- topico4_elecciones %>%
+        mutate(texto = str_replace_all(texto, "'\\[.*?¿\\]\\%'", " ")) %>%
+        mutate(texto = str_replace_all(texto, "[[:digit:]]+", "DIGITO"))
+```
+
+<br>
+Cargamos los embeddings sugeridos.
+```{r message=FALSE}
+load_embeddings <- function(path=NULL, type=c("w2v", "ft")){
+        if (type=="w2v"){
+                embedding <- word2vec::read.wordvectors(path, 
+                                                        type = "bin", 
+                                                        normalize = TRUE) %>%
+                        as_tibble(rownames="word")
+        }
+        else if (type=="ft"){
+                model <- fastTextR::ft_load(path)
+                words <- fastTextR::ft_words(model)
+                embedding <- fastTextR::ft_word_vectors(model,
+                                                        words) %>%
+                        as_tibble(rownames="word")
+        }
+        
+        return(embedding)
+}
+
+embedding <- load_embeddings(
+  path = "../bases/sbw_vectors.bin",
+  type = "w2v"
+)
+```
+
+<br>
+Utilizamos, nuevamente, el flujo de tidymodels para calcular la base de embeddings para nuestro set.
+Repetimos este paso, pero sin realizar PCA. Luego aplicamos la receta.
+```{r}
+receta_embedd <- recipe(orientacion ~ ., data = topico4_elecciones_clean) %>%
+  update_role("id", new_role = "ID") %>% 
+  step_tokenize(texto) %>% 
+  step_word_embeddings(texto, 
+                       embeddings=embedding,
+                       aggregation = "mean")
+
+tictoc::tic()
+topico4_embedd <- receta_embedd %>% prep() %>% bake(topico4_elecciones_clean)
+tictoc::toc()
+```
+
+<br>
+Generamos las submuestras de entrenamiento y testeo.
+```{r}
+set.seed(664)
+notas_split_t4 <- initial_split(topico4_embedd, strata = orientacion)
+bd_train_t4 <- training(notas_split_t4)
+bd_test_t4 <- testing(notas_split_t4)
+```
+
+
+#### Comenzamos a diseñar nuestro Random Forest
+
+<br>
+**Creamos la receta**
+```{r}
+receta_rf <- recipe(orientacion ~ ., data = bd_train_t4)%>%
+  update_role(id, new_role = "id") %>%
+  step_downsample(orientacion, under_ratio = 1)
+```
+
+<br>
+**Establecemos el modelo y luego el workflow.**
+Fijamos en 200 la cantidad de árboles y dejamos por determinar los hiperparámetros mtry (cantidad de variables predictoras que se seleccionan en cada división) y min_n (cantidad de observaciones mínimas en un nodo para realizar una nueva división).
+```{r}
+modelo_rf <- rand_forest(
+  trees = 200,
+  mtry = tune(),
+  min_n = tune()
+  ) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+
+work_flow_rf <- workflow() %>% 
+  add_recipe(receta_rf) %>% 
+  add_model(modelo_rf)
+```
+
+<br>
+Comenzamos a tunear nuestros hiperparámetros
+```{r}
+# Definimos una cuadrícula de búsqueda, ganando control sobre los posible valores que asume cada hiperparámetro
+cuadricula <- grid_regular(
+  mtry(range = c(10, 100)),  # Rango para mtry
+  min_n(range = c(2, 20)),   # Rango para min_n
+  levels = 5  # Número de valores a probar para cada hiperparámetro
+)
+
+# Ajustar el modelo con validación cruzada
+set.seed(664)  # Para reproducibilidad
+resultados_ajuste <- tune_grid(
+  work_flow_rf,
+  resamples = vfold_cv(bd_train_t4, v = 5),  # Validación cruzada con 5 folds (nuestra base es pequeña)
+  grid = cuadricula,
+  metrics = metric_set(roc_auc, accuracy, precision, recall)  # Métricas a optimizar
+)
+
+# Seleccionamos los mejores hiperparámetros
+mejores_hiperparametros <- select_best(resultados_ajuste, metric = "roc_auc")
+
+mejores_hiperparametros
+```
+
+<br>
+Nos ha seleccionado los hiperparámetros más altos aportados por la grilla. Esto parece indicarnos que podemos hacer crecer esos hiperparámetro bastante. Haemos otra prueba.
+```{r}
+set.seed(664) 
+
+resultados_ajuste2 <- tune_grid(work_flow_rf,
+                         resamples = vfold_cv(bd_train_t4),  # Validación cruzada. 10 folds por defecto.
+                         grid = 10,  # Número de combinaciones aleatorias
+                         metrics = metric_set(roc_auc, accuracy, precision, recall))
+
+mejores_hiperparametros2 <- select_best(resultados_ajuste2, metric = "roc_auc")
+
+mejores_hiperparametros2
+```
+
+<br>
+Comparamos las métricas obtenidas
+```{r}
+show_best(resultados_ajuste)
+```
+
+```{r}
+show_best(resultados_ajuste2)
+```
+
+<br>
+Vemos que las métricas arrojadas por la segunda prueba mejoran tanto a nivel de la media como del standard error.
+
+<br>
+**Finalizamos nuestro modelo**, incorporando los hiperparámetros seleccionados.
+```{r}
+# Finalizar el modelo con los mejores hiperparámetros
+modelo_final <- finalize_workflow(work_flow_rf, mejores_hiperparametros2) %>%
+  fit(bd_train_t4)  # Entrenar el modelo final
+
+modelo_final
+```
+
+<br>
+Testeamos y calculamos métricas.
+```{r}
+test_val <- modelo_final %>%
+  predict(bd_test_t4) %>%
+  bind_cols(., bd_test_t4)
+
+test_val <- test_val %>% 
+  select(1:3) %>% 
+  rename(prediccion = ".pred_class")
+
+test_val <- predict(modelo_final, bd_test_t4, type = "prob") %>%
+  bind_cols(test_val, .)
+
+metrics_random <- roc_auc(test_val, truth = orientacion, .pred_conservador, .pred_neutro, .pred_progresista) %>%
+  bind_rows(accuracy(test_val, truth = orientacion, estimate = prediccion)) %>%
+  bind_rows(precision(test_val, truth = orientacion, estimate = prediccion)) %>%
+  bind_rows(recall(test_val, truth = orientacion, estimate = prediccion)) %>%
+  bind_rows(f_meas(test_val, truth = orientacion, estimate = prediccion)) %>%
+  mutate(modelo = "random_forest")
+
+tabla_rf <- metrics_random %>% 
+  select(-.estimator) %>% 
+  gt() %>% 
+  tab_header(
+    title = md("Métricas de performance - Multiclase"),  
+    subtitle = md("Random forest con tópico 4"))%>%
+  cols_label(
+    .metric = md("**Metrica**"),   # Rename .metric to "Metric" (bold)
+    .estimate = md("**Estimado**") # Rename .estimate to "Estimate" (bold)
+  ) %>%
+  fmt_number(columns = c(.estimate), decimals = 3) 
+
+#gtsave(tabla_rf, "../visualizaciones/metricas-modelos/Nuevas/tabla_t4_rf.png")
+
+tabla_rf
+```
+
